@@ -1,4 +1,4 @@
-# Smog Navigator — MVP
+# Aua — smog navigator for Almaty (MVP)
 
 Personal air-quality advice, cleaner walking routes and smart alerts for Almaty (SDG 3.9 / 11.6).
 Course project, Human–Computer Interaction, Team 1.

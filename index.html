@@ -3,17 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Smog Navigator — MVP</title>
-<meta name="description" content="Smog Navigator: personal air-quality advice, cleaner routes and smart alerts for Almaty. SDG 3.9 / 11.6.">
-<meta name="theme-color" content="#24364a">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%2324364a'/%3E%3Cpath d='M6 46 22 24l8 10 8-14 20 26z' fill='%23eef3f7'/%3E%3Crect x='6' y='38' width='52' height='10' fill='%23c9a36a' opacity='.7'/%3E%3C/svg%3E">
+<title>Aua — smog navigator for Almaty</title>
+<meta name="description" content="Aua: personal air-quality advice, cleaner routes and smart alerts for Almaty. SDG 3.9 / 11.6.">
+<meta name="theme-color" content="#0d6e78">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%20256%20256%22%3E%3Crect%20width%3D%22256%22%20height%3D%22256%22%20rx%3D%2256%22%20fill%3D%22%230d6e78%22/%3E%3Cg%20transform%3D%22translate%2838%2034%29%20scale%28.70%29%22%3E%3Cpath%20fill%3D%22%23fff%22%20d%3D%22M24%20146%20L92%2054%20L124%2096%20L150%2062%20L232%20146%20Z%20M36%20164%20H220%20A9%209%200%200%201%20220%20182%20H36%20A9%209%200%200%201%2036%20164%20Z%20M60%20196%20H196%20A9%209%200%200%201%20196%20214%20H60%20A9%209%200%200%201%2060%20196%20Z%20M92%20228%20H164%20A7%207%200%200%201%20164%20242%20H92%20A7%207%200%200%201%2092%20228%20Z%22/%3E%3C/g%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
 <style>
 /* ================================================================
-   Smog Navigator MVP — one file, no build step.
+   Aua MVP — one file, no build step.
    Design idea: in Almaty people judge smog by whether they can see
    the mountains. The hero is a live ridge of the Zailiysky Alatau
    that disappears behind haze as PM2.5 rises.
@@ -181,6 +182,7 @@ input[type=time],select.in{border:1.5px solid var(--line);border-radius:12px;pad
 .ob .steps{display:flex;gap:6px;margin-bottom:22px}
 .ob .steps i{flex:1;height:4px;border-radius:4px;background:#d2dae2}
 .ob .steps i.on{background:var(--glacier)}
+.ob-brand{display:flex;align-items:center;gap:10px;margin:0 0 14px}.ob-brand b{font-size:1.5rem;font-weight:900;letter-spacing:-.02em}.ob-brand span{color:var(--ink-2);font-size:.9rem;font-weight:600}
 .ob h1{font-size:1.75rem;line-height:1.15;margin:0 0 8px;letter-spacing:-.015em}
 .ob p.lead{color:var(--ink-2);margin:0 0 20px;line-height:1.5}
 .ob .foot{margin-top:auto;padding-top:20px;display:flex;flex-direction:column;gap:8px}
@@ -224,7 +226,7 @@ input[type=time],select.in{border:1.5px solid var(--line);border-radius:12px;pad
 .push{position:absolute;left:10px;right:10px;top:10px;z-index:70;background:rgba(250,252,253,.97);border-radius:20px;padding:12px 14px;box-shadow:0 10px 30px rgba(0,0,0,.25);
   display:grid;grid-template-columns:38px 1fr;gap:10px;transform:translateY(-160%);visibility:hidden;transition:transform .4s cubic-bezier(.2,.8,.2,1),visibility 0s .4s}
 .push.on{transform:none;visibility:visible;transition:transform .4s cubic-bezier(.2,.8,.2,1)}
-.push .appi{width:38px;height:38px;border-radius:10px;background:#24364a;display:grid;place-items:center}
+.push .appi{width:38px;height:38px;border-radius:10px;overflow:hidden}
 .push b{font-size:.88rem}.push p{margin:2px 0 0;font-size:.88rem;line-height:1.35;color:var(--ink-2)}
 .push .when{float:right;font-size:.75rem;color:var(--ink-3)}
 .dialog{position:absolute;z-index:80;left:24px;right:24px;top:50%;transform:translateY(-50%) scale(.96);opacity:0;pointer-events:none;background:var(--paper);border-radius:22px;padding:20px;transition:all .2s;box-shadow:0 20px 60px rgba(0,0,0,.3)}
@@ -290,8 +292,8 @@ table.res td,table.res th{border-bottom:1px solid var(--line);padding:5px 4px;te
   <!-- presenter side: what this is -->
   <aside class="stage-side" aria-label="About this prototype">
     <div class="brand">
-      <svg width="44" height="44" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#24364a"/><path d="M6 46 22 24l8 10 8-14 20 26z" fill="#eef3f7"/><rect x="6" y="38" width="52" height="10" fill="#c9a36a" opacity=".7"/></svg>
-      <div><b>Smog Navigator</b><small>MVP · SDG 3.9 / 11.6 · Team 1</small></div>
+      <svg width="44" height="44" viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" rx="56" fill="#0d6e78"/><g transform="translate(38 34) scale(.70)"><path fill="#fff" d="M24 146 L92 54 L124 96 L150 62 L232 146 Z M36 164 H220 A9 9 0 0 1 220 182 H36 A9 9 0 0 1 36 164 Z M60 196 H196 A9 9 0 0 1 196 214 H60 A9 9 0 0 1 60 196 Z M92 228 H164 A7 7 0 0 1 164 242 H92 A7 7 0 0 1 92 228 Z"/></g></svg>
+      <div><b>Aua</b><small>Smog navigator for Almaty · SDG 3.9 / 11.6 · Team 1</small></div>
     </div>
     <div>
       <h2>Device</h2>
@@ -377,7 +379,7 @@ const I18N = {
   obStep3:"Where are you?",obLead3:"Smog in Almaty differs a lot by district: the north and west are usually worse than the foothills.",
   useGps:"Use my location",useGpsS:"Only on this phone, never stored on a server",chooseDistrict:"Choose a district instead",
   obStep4:"When should we warn you?",obLead4:"Alerts use the forecast, so you hear about bad air before it arrives.",
-  obDone:"Start using Smog Navigator",
+  obDone:"Start using Aua",
   district:"District",nearYou:"near you",
   updated:"Updated",source:"PM2.5 forecast · Copernicus CAMS via Open-Meteo",notSensor:"This is a model forecast, not a sensor reading.",refresh:"Refresh",
   mtVisible:"Mountains visible",mtHazy:"Mountains in haze",mtHidden:"Mountains hidden",
@@ -410,7 +412,7 @@ const I18N = {
   meLoc:"Location",mePriv:"Your data",mePrivS:"Your health profile and location stay on this phone. We send the server only a district, never your exact position.",
   meDel:"Delete all my data",delQ:"Delete all your data?",delP:"Your profile, alert settings and saved places will be removed from this phone. This cannot be undone.",
   cancel:"Cancel",del:"Delete",deleted:"All data deleted.",
-  disclaimer:"Smog Navigator gives advice, not a medical diagnosis. If you have symptoms, talk to a doctor.",
+  disclaimer:"Aua gives advice, not a medical diagnosis. If you have symptoms, talk to a doctor.",
   edit:"Edit",done:"Done",
   detailTitle:"Walk plan for today",detailLead:"Hours below your safe level are marked. Your level: {lvl}.",lvlSens:"stricter (sensitive profile)",lvlGen:"standard",
   close:"Close",windowList:"Good windows today",noWindow:"No safe window in the next 24 hours.",
@@ -462,7 +464,7 @@ const I18N = {
   meLoc:"Местоположение",mePriv:"Ваши данные",mePrivS:"Профиль здоровья и геолокация остаются на телефоне. На сервер уходит только район, не точный адрес.",
   meDel:"Удалить все мои данные",delQ:"Удалить все данные?",delP:"Профиль, настройки оповещений и места удалятся с телефона. Это нельзя отменить.",
   cancel:"Отмена",del:"Удалить",deleted:"Все данные удалены.",
-  disclaimer:"Smog Navigator даёт советы, а не медицинский диагноз. Если есть симптомы — обратитесь к врачу.",
+  disclaimer:"Aua даёт советы, а не медицинский диагноз. Если есть симптомы — обратитесь к врачу.",
   edit:"Изменить",done:"Готово",
   detailTitle:"План прогулки на сегодня",detailLead:"Отмечены часы ниже вашего безопасного уровня. Ваш уровень: {lvl}.",lvlSens:"строже (группа риска)",lvlGen:"обычный",
   close:"Закрыть",windowList:"Хорошие окна сегодня",noWindow:"В ближайшие 24 часа безопасного окна нет.",
@@ -514,7 +516,7 @@ const I18N = {
   meLoc:"Орналасу",mePriv:"Деректеріңіз",mePrivS:"Денсаулық профилі мен орныңыз телефонда қалады. Серверге тек аудан жіберіледі.",
   meDel:"Барлық деректерімді жою",delQ:"Барлық деректі жою керек пе?",delP:"Профиль, баптаулар мен орындар телефоннан өшеді. Мұны қайтару мүмкін емес.",
   cancel:"Бас тарту",del:"Жою",deleted:"Барлық дерек жойылды.",
-  disclaimer:"Smog Navigator кеңес береді, медициналық диагноз емес. Белгілер болса, дәрігерге барыңыз.",
+  disclaimer:"Aua кеңес береді, медициналық диагноз емес. Белгілер болса, дәрігерге барыңыз.",
   edit:"Өзгерту",done:"Дайын",
   detailTitle:"Бүгінгі серуен жоспары",detailLead:"Қауіпсіз деңгейден төмен сағаттар белгіленген. Деңгейіңіз: {lvl}.",lvlSens:"қатаң (қауіп тобы)",lvlGen:"қалыпты",
   close:"Жабу",windowList:"Бүгінгі жақсы уақыт",noWindow:"Алдағы 24 сағатта қауіпсіз уақыт жоқ.",
@@ -690,6 +692,7 @@ function renderOB(){
   let body="",foot="";
   if(obStep===0){
     body=`<div class="ob-hero sky" style="height:210px">${skySVG(air?air.pm[0]:20,"ob")}</div>
+      <div class="ob-brand"><svg width="40" height="40" viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" rx="56" fill="#0d6e78"/><g transform="translate(38 34) scale(.70)"><path fill="#fff" d="M24 146 L92 54 L124 96 L150 62 L232 146 Z M36 164 H220 A9 9 0 0 1 220 182 H36 A9 9 0 0 1 36 164 Z M60 196 H196 A9 9 0 0 1 196 214 H60 A9 9 0 0 1 60 196 Z M92 228 H164 A7 7 0 0 1 164 242 H92 A7 7 0 0 1 92 228 Z"/></g></svg><b>Aua</b><span>smog navigator</span></div>
       <h1>${t("obStep1")}</h1><p class="lead">${t("obLead1")}</p>
       <p style="font-weight:700;margin:0 0 8px">${t("obLang")}</p>${langsHTML()}`;
     foot=`<button class="btn" data-ob="next">${t("obNext")}</button>`;
@@ -883,7 +886,7 @@ function districtSheet(){
 }
 function previewPush(){
   const L=limitPM(); let j=air.pm.findIndex((p,i)=>i>0&&p>L); if(j<0) j=air.pm.indexOf(Math.max(...air.pm));
-  const p=$("#push"); p.innerHTML=`<div class="appi"><svg width="22" height="22" viewBox="0 0 64 64" aria-hidden="true"><path d="M6 46 22 24l8 10 8-14 20 26z" fill="#eef3f7"/><rect x="6" y="38" width="52" height="10" fill="#c9a36a" opacity=".8"/></svg></div>
+  const p=$("#push"); p.innerHTML=`<div class="appi"><svg width="38" height="38" style="border-radius:10px" viewBox="0 0 256 256" aria-hidden="true"><rect width="256" height="256" rx="56" fill="#0d6e78"/><g transform="translate(38 34) scale(.70)"><path fill="#fff" d="M24 146 L92 54 L124 96 L150 62 L232 146 Z M36 164 H220 A9 9 0 0 1 220 182 H36 A9 9 0 0 1 36 164 Z M60 196 H196 A9 9 0 0 1 196 214 H60 A9 9 0 0 1 60 196 Z M92 228 H164 A7 7 0 0 1 164 242 H92 A7 7 0 0 1 92 228 Z"/></g></svg></div>
    <div><span class="when">${S.lang==="en"?"now":S.lang==="ru"?"сейчас":"қазір"}</span><b>${t("pushWorse")}</b><p>${t("pushWorseB",{v:air.pm[j].toFixed(0),t:hh(air.times[j])})}</p></div>`;
   p.classList.add("on"); setTimeout(()=>p.classList.remove("on"),4200); track("alert_preview");
 }
@@ -1066,7 +1069,7 @@ function renderTest(){
     R.forEach(p=>p.tasks.forEach(x=>rows.push([p.pid,p.group,p.date,x.task,x.success,x.seconds,x.taps,p.sus_score,p.comment])));
     R.forEach(p=>rows.push([p.pid,p.group,p.date,"SUS_items",p.sus.join(" "),"","",p.sus_score,""]));
     const csv=rows.map(r=>r.map(v=>`"${String(v??"").replace(/"/g,'""')}"`).join(",")).join("\n");
-    const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["﻿"+csv],{type:"text/csv"}));a.download="smog_navigator_usability.csv";a.click()});
+    const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["﻿"+csv],{type:"text/csv"}));a.download="aua_usability.csv";a.click()});
   on("tJson",()=>{navigator.clipboard.writeText(JSON.stringify(allResults(),null,1));toast("Results copied")});
 }
 setInterval(()=>{const c=document.getElementById("tClock");if(c&&TS.phase==="task")c.textContent=Math.round((performance.now()-TS.start)/1000)+"s"},500);
