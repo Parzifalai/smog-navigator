@@ -1,0 +1,1079 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Smog Navigator — MVP</title>
+<meta name="description" content="Smog Navigator: personal air-quality advice, cleaner routes and smart alerts for Almaty. SDG 3.9 / 11.6.">
+<meta name="theme-color" content="#24364a">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%2324364a'/%3E%3Cpath d='M6 46 22 24l8 10 8-14 20 26z' fill='%23eef3f7'/%3E%3Crect x='6' y='38' width='52' height='10' fill='%23c9a36a' opacity='.7'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+<style>
+/* ================================================================
+   Smog Navigator MVP — one file, no build step.
+   Design idea: in Almaty people judge smog by whether they can see
+   the mountains. The hero is a live ridge of the Zailiysky Alatau
+   that disappears behind haze as PM2.5 rises.
+   Tokens: ink #1f2d3d · ridge #3e5468 · snow #f4f7fa · glacier #0d6e78
+           haze #c9a36a · smog #6b5240
+   ================================================================ */
+:root{
+  --ink:#1f2d3d; --ink-2:#4a5a6b; --ink-3:#5a6878;
+  --ridge:#3e5468; --snow:#f4f7fa; --paper:#ffffff; --line:#dfe5eb;
+  --glacier:#0d6e78; --glacier-ink:#ffffff; --glacier-soft:#e3f1f2;
+  --haze:#c9a36a; --smog:#6b5240;
+  /* AQI categories (always shown with words + pattern, never colour alone) */
+  --q0:#26784c; --q1:#b88a12; --q2:#c2630f; --q3:#b3261e; --q4:#7b2a7f; --q5:#5a1a22;
+  --r-s:10px; --r-m:16px; --r-l:24px;
+  --fs:1rem;
+  --shadow:0 1px 2px rgba(31,45,61,.08), 0 8px 24px rgba(31,45,61,.08);
+  font-family:"Golos Text", system-ui, "Segoe UI", sans-serif;
+  color:var(--ink);
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:#d9e1e8;font-size:var(--fs);-webkit-font-smoothing:antialiased;font-feature-settings:"tnum" 1}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:3px solid #1b7fd6;outline-offset:2px;border-radius:6px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* ---------- desktop stage (presenter view) ---------- */
+.stage{min-height:100%;display:grid;grid-template-columns:minmax(240px,320px) auto minmax(240px,340px);gap:40px;
+  align-items:center;justify-content:center;padding:32px}
+.stage-side{align-self:stretch;display:flex;flex-direction:column;gap:20px;padding-top:24px}
+.brand{display:flex;gap:12px;align-items:center}
+.brand b{font-size:1.25rem;font-weight:800;letter-spacing:-.01em}
+.brand small{display:block;color:var(--ink-2);font-size:.85rem}
+.stage-side h2{font-size:.95rem;margin:0 0 8px;font-weight:700}
+.stage-side p{margin:0;color:var(--ink-2);line-height:1.5;font-size:.92rem}
+.seg{display:flex;background:#c8d2dc;border-radius:12px;padding:3px;gap:3px}
+.seg button{flex:1;border:0;background:transparent;padding:8px 10px;border-radius:9px;font-weight:600;font-size:.88rem}
+.seg button[aria-pressed=true]{background:var(--paper);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.stage select{width:100%;padding:10px;border-radius:10px;border:1px solid #b9c5d0;background:var(--paper)}
+.facts{font-size:.85rem;color:var(--ink-2);line-height:1.55}
+.facts strong{color:var(--ink)}
+
+.device{width:390px;height:min(844px,calc(100vh - 40px));border-radius:52px;background:#101820;padding:12px;box-shadow:0 30px 80px rgba(20,35,50,.35);
+  transition:width .45s cubic-bezier(.2,.8,.2,1),height .45s cubic-bezier(.2,.8,.2,1),border-radius .45s}
+.device.tablet{width:820px;height:1100px;max-height:calc(100vh - 64px);border-radius:36px}
+.screen{position:relative;width:100%;height:100%;border-radius:40px;overflow:hidden;background:var(--snow);container-type:inline-size;container-name:app}
+.device.tablet .screen{border-radius:26px}
+@media (max-width:1180px){ .stage{grid-template-columns:auto;padding:0} .stage-side{display:none} .device{width:100vw;height:100dvh;border-radius:0;padding:0;box-shadow:none} .screen{border-radius:0} body{background:var(--snow)} }
+@media (max-width:1180px){ .test-dock{display:block!important} }
+
+/* ---------- app shell ---------- */
+.app{position:absolute;inset:0;display:flex;flex-direction:column}
+.view{position:absolute;inset:0 0 72px 0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-width:thin}
+.view[hidden]{display:none}
+.tabbar{position:absolute;left:0;right:0;bottom:0;height:72px;background:rgba(255,255,255,.96);backdrop-filter:blur(10px);
+  border-top:1px solid var(--line);display:flex;padding:6px 8px calc(6px + env(safe-area-inset-bottom))}
+.tabbar button{flex:1;border:0;background:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+  font-size:.74rem;font-weight:600;color:var(--ink-3);border-radius:12px}
+.tabbar button svg{width:24px;height:24px}
+.tabbar button[aria-current=page]{color:var(--glacier)}
+.tabbar button[aria-current=page] .pill{background:var(--glacier-soft)}
+.tabbar .pill{padding:3px 16px;border-radius:99px;display:flex}
+.app.onboarding .tabbar{display:none}
+.app.onboarding .view{bottom:0}
+
+/* ---------- sky hero (the one bold element) ---------- */
+.sky{position:relative;min-height:330px;padding-bottom:52px;color:#fff;overflow:hidden;isolation:isolate}
+.sky svg.ridge{position:absolute;inset:0;width:100%;height:100%;display:block}
+.sky::after{content:"";position:absolute;inset:0 0 auto 0;height:62%;z-index:2;background:linear-gradient(180deg,rgba(16,26,38,.55),rgba(16,26,38,.18) 70%,transparent);pointer-events:none}
+.sky .haze{position:absolute;inset:0;z-index:2;pointer-events:none;transition:opacity 1.2s ease, background 1.2s ease}
+.sky .content{position:relative;z-index:3;padding:52px 20px 0}
+.loc{display:inline-flex;align-items:center;gap:6px;background:rgba(15,25,35,.32);border:0;color:#fff;
+  padding:7px 12px;border-radius:99px;font-size:.85rem;font-weight:600;backdrop-filter:blur(6px)}
+.aqi-row{display:flex;align-items:flex-end;gap:14px;margin-top:18px}
+.aqi-num{font-size:5.2rem;line-height:.82;font-weight:900;letter-spacing:-.04em;text-shadow:0 2px 18px rgba(0,0,0,.25)}
+.aqi-meta{padding-bottom:6px;font-size:.9rem;line-height:1.35;text-shadow:0 1px 8px rgba(0,0,0,.35)}
+.aqi-meta b{display:block;font-size:1.05rem}
+.aqi-btn{border:0;background:none;color:inherit;padding:0;text-align:left;cursor:pointer}
+.why-link{display:block;margin-top:4px;font-weight:700;text-decoration:underline;text-underline-offset:3px;font-size:.82rem}
+.fresh{position:relative;margin:10px 0 0;font-size:.8rem;font-weight:600;opacity:.92;text-shadow:0 1px 8px rgba(0,0,0,.4)}
+.qerr{color:#8c1d13;font-size:.82rem;font-weight:600;margin:4px 0 0}
+.scale-row{display:grid;grid-template-columns:14px 64px 1fr;gap:10px;align-items:start;padding:8px 0;border-bottom:1px solid var(--line);font-size:.86rem}
+.scale-row.on{background:var(--glacier-soft);border-radius:10px;padding:8px}
+.scale-row i{width:14px;height:14px;border-radius:4px;margin-top:2px}
+.headline{font-size:1.55rem;line-height:1.18;font-weight:800;margin:16px 0 0;max-width:22ch;letter-spacing:-.01em;text-shadow:0 1px 14px rgba(0,0,0,.35)}
+.mountain-note{position:absolute;z-index:3;right:16px;bottom:14px;font-size:.78rem;font-weight:600;background:rgba(15,25,35,.38);
+  padding:5px 10px;border-radius:99px;backdrop-filter:blur(6px)}
+
+/* ---------- content blocks ---------- */
+.pad{padding:16px}
+.stack{display:flex;flex-direction:column;gap:12px}
+.card{background:var(--paper);border-radius:var(--r-m);padding:16px;box-shadow:var(--shadow)}
+.answer{display:grid;grid-template-columns:44px 1fr auto;gap:12px;align-items:center;text-align:left;border:0;width:100%}
+.answer .ico{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;background:var(--glacier-soft);color:var(--glacier)}
+.answer .ico svg{width:24px;height:24px}
+.answer .q{font-size:.82rem;color:var(--ink-2);font-weight:600}
+.answer .a{font-size:1.08rem;font-weight:700;margin-top:2px;line-height:1.3}
+.answer .chev{color:var(--ink-3)}
+.badge{display:inline-flex;align-items:center;gap:6px;font-weight:700;font-size:.8rem;padding:4px 10px;border-radius:99px;color:#fff}
+.meta{font-size:.8rem;color:var(--ink-3);line-height:1.45}
+.meta button{border:0;background:none;color:var(--glacier);font-weight:700;padding:0 2px}
+.sec-title{font-size:1rem;font-weight:800;margin:8px 4px 0;display:flex;justify-content:space-between;align-items:baseline}
+.sec-title span{font-size:.8rem;color:var(--ink-3);font-weight:500}
+
+/* forecast strip */
+.strip{display:flex;gap:4px;overflow-x:auto;padding:4px 2px 8px;scroll-snap-type:x mandatory;scrollbar-width:none}
+.hour{flex:0 0 38px;display:flex;flex-direction:column;align-items:center;gap:4px;scroll-snap-align:start;border:0;background:none;padding:0}
+.hour .bar{width:26px;border-radius:7px 7px 4px 4px;position:relative;min-height:6px}
+.hour .bar.pat::after{content:"";position:absolute;inset:0;border-radius:inherit;background:repeating-linear-gradient(135deg,rgba(255,255,255,.35) 0 3px,transparent 3px 7px)}
+.hour .t{font-size:.72rem;color:var(--ink-3);font-weight:600}
+.hour .v{font-size:.68rem;font-weight:700;color:var(--ink-2)}
+.hour.now .t{color:var(--ink);font-weight:800}
+.hour.best .t::after{content:"";display:block;width:6px;height:6px;border-radius:50%;background:var(--glacier);margin:2px auto 0}
+.bars{height:110px;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:3px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 12px;font-size:.74rem;color:var(--ink-2)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:4px;vertical-align:-1px}
+
+/* banners & states */
+.banner{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:14px;font-size:.88rem;line-height:1.4}
+.banner svg{flex:0 0 20px;width:20px;height:20px;margin-top:1px}
+.banner.warn{background:#fff4e0;color:#6b4300}
+.banner.err{background:#fde8e6;color:#7a1c14}
+.banner.info{background:var(--glacier-soft);color:#08464c}
+.banner .act{display:block;margin-top:6px}
+.banner button{border:0;border-radius:10px;padding:8px 12px;font-weight:700;background:rgba(0,0,0,.08);margin-right:6px;margin-top:4px}
+.skel{background:linear-gradient(90deg,#e6ebf0 0,#f3f6f8 40%,#e6ebf0 80%);background-size:300% 100%;animation:sk 1.3s infinite;border-radius:12px}
+@keyframes sk{to{background-position:-150% 0}}
+
+/* buttons, inputs */
+.btn{border:0;border-radius:14px;padding:14px 18px;font-weight:700;font-size:1rem;background:var(--glacier);color:var(--glacier-ink);min-height:48px;width:100%}
+.btn.sec{background:var(--paper);color:var(--ink);box-shadow:inset 0 0 0 1.5px var(--line)}
+.btn.ghost{background:none;color:var(--glacier);width:auto;padding:10px 4px;min-height:44px}
+.btn.danger{background:#fbe9e7;color:#8c1d13}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.row{display:flex;gap:10px;align-items:center}
+.chips{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.chip{display:flex;flex-direction:column;align-items:flex-start;gap:8px;text-align:left;padding:14px;border-radius:16px;border:1.5px solid var(--line);background:var(--paper);min-height:96px}
+.chip svg{width:26px;height:26px;color:var(--ridge)}
+.chip b{font-size:.95rem}
+.chip small{color:var(--ink-3);font-size:.78rem;line-height:1.3}
+.chip[aria-pressed=true]{border-color:var(--glacier);background:var(--glacier-soft);box-shadow:inset 0 0 0 1px var(--glacier)}
+.chip[aria-pressed=true] svg{color:var(--glacier)}
+.switch{position:relative;width:52px;height:32px;flex:0 0 52px;border-radius:99px;background:#c2ccd6;border:0;transition:background .2s}
+.switch::after{content:"";position:absolute;top:3px;left:3px;width:26px;height:26px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .2s}
+.switch[aria-checked=true]{background:var(--glacier)}
+.switch[aria-checked=true]::after{transform:translateX(20px)}
+.set{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 0;border-bottom:1px solid var(--line)}
+.set:last-child{border-bottom:0}
+.set .l b{display:block;font-size:.95rem}
+.set .l small{color:var(--ink-3);font-size:.8rem;line-height:1.35;display:block;margin-top:2px}
+.radio{display:flex;flex-direction:column;gap:8px}
+.radio button{display:flex;gap:12px;align-items:flex-start;text-align:left;border:1.5px solid var(--line);background:var(--paper);border-radius:14px;padding:12px 14px}
+.radio button::before{content:"";flex:0 0 20px;height:20px;border-radius:50%;border:2px solid #9aa8b5;margin-top:1px}
+.radio button[aria-checked=true]{border-color:var(--glacier);background:var(--glacier-soft)}
+.radio button[aria-checked=true]::before{border:6px solid var(--glacier)}
+.radio b{display:block;font-size:.93rem}.radio small{color:var(--ink-2);font-size:.8rem}
+input[type=time],select.in{border:1.5px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--paper);min-height:44px;font-weight:600}
+.topbar{position:sticky;top:0;z-index:5;background:rgba(244,247,250,.94);backdrop-filter:blur(8px);padding:48px 16px 10px}
+.topbar h1{margin:0;font-size:1.6rem;font-weight:800;letter-spacing:-.01em}
+.topbar p{margin:4px 0 0;color:var(--ink-2);font-size:.9rem}
+
+/* onboarding */
+.ob{min-height:100%;display:flex;flex-direction:column;padding:52px 20px 24px}
+.ob .steps{display:flex;gap:6px;margin-bottom:22px}
+.ob .steps i{flex:1;height:4px;border-radius:4px;background:#d2dae2}
+.ob .steps i.on{background:var(--glacier)}
+.ob h1{font-size:1.75rem;line-height:1.15;margin:0 0 8px;letter-spacing:-.015em}
+.ob p.lead{color:var(--ink-2);margin:0 0 20px;line-height:1.5}
+.ob .foot{margin-top:auto;padding-top:20px;display:flex;flex-direction:column;gap:8px}
+.ob-hero{height:210px;border-radius:24px;overflow:hidden;position:relative;margin:-8px 0 22px}
+.langs{display:flex;gap:8px;margin-bottom:16px}
+.langs button{flex:1;border:1.5px solid var(--line);background:var(--paper);border-radius:12px;padding:10px;font-weight:700}
+.langs button[aria-pressed=true]{border-color:var(--glacier);background:var(--glacier-soft);color:#08464c}
+
+/* route */
+.map{height:300px;background:#e5eaee;position:relative;z-index:1}
+.route-form{display:grid;grid-template-columns:1fr;gap:8px}
+.route-form label{font-size:.78rem;font-weight:700;color:var(--ink-2)}
+.route-form select{width:100%}
+.rcard{display:grid;grid-template-columns:6px minmax(0,1fr) auto;gap:12px;align-items:center;text-align:left;width:100%;border:1.5px solid var(--line);background:var(--paper);border-radius:16px;padding:14px 14px 14px 12px}
+.radio button.rcard::before{display:none}
+.rcard .stripe{align-self:stretch;border-radius:6px}
+.rcard .num{white-space:nowrap}
+.rcard[aria-checked=true]{border-color:var(--glacier);box-shadow:inset 0 0 0 1px var(--glacier)}
+.rcard b{font-size:1rem}
+.rcard .why{font-size:.8rem;color:var(--ink-2);margin-top:3px;line-height:1.35}
+.rcard .num{text-align:right}
+.rcard .num strong{display:block;font-size:1.2rem;font-weight:800}
+.rcard .num span{font-size:.78rem;color:var(--ink-2)}
+.delta{font-weight:800;color:var(--q0)}
+.delta.bad{color:var(--q3)}
+.tag{display:inline-block;font-size:.7rem;font-weight:800;padding:2px 8px;border-radius:99px;background:var(--glacier-soft);color:#08464c;margin-left:6px;vertical-align:2px}
+
+/* sheet, dialog, toast, push */
+.scrim{position:absolute;inset:0;background:rgba(15,25,35,.42);z-index:40;opacity:0;pointer-events:none;transition:opacity .25s}
+.scrim.on{opacity:1;pointer-events:auto}
+.sheet{position:absolute;left:0;right:0;bottom:0;z-index:41;background:var(--paper);border-radius:24px 24px 0 0;padding:10px 18px 24px;max-height:86%;overflow-y:auto;
+  transform:translateY(105%);transition:transform .32s cubic-bezier(.2,.8,.2,1)}
+.sheet.on{transform:none}
+.sheet .grab{width:40px;height:5px;border-radius:5px;background:#cfd7df;margin:0 auto 12px}
+.sheet h2{margin:0 0 6px;font-size:1.3rem}
+.toast{position:absolute;left:12px;right:12px;bottom:84px;z-index:60;background:#1f2d3d;color:#fff;border-radius:14px;padding:12px 14px;display:flex;align-items:center;gap:12px;
+  font-size:.9rem;transform:translateY(20px);opacity:0;pointer-events:none;transition:all .25s}
+.toast.on{transform:none;opacity:1;pointer-events:auto}
+.toast span{flex:1;line-height:1.35}
+.toast button{border:0;background:none;color:#8fe3ea;font-weight:800;padding:8px}
+.push{position:absolute;left:10px;right:10px;top:10px;z-index:70;background:rgba(250,252,253,.97);border-radius:20px;padding:12px 14px;box-shadow:0 10px 30px rgba(0,0,0,.25);
+  display:grid;grid-template-columns:38px 1fr;gap:10px;transform:translateY(-160%);visibility:hidden;transition:transform .4s cubic-bezier(.2,.8,.2,1),visibility 0s .4s}
+.push.on{transform:none;visibility:visible;transition:transform .4s cubic-bezier(.2,.8,.2,1)}
+.push .appi{width:38px;height:38px;border-radius:10px;background:#24364a;display:grid;place-items:center}
+.push b{font-size:.88rem}.push p{margin:2px 0 0;font-size:.88rem;line-height:1.35;color:var(--ink-2)}
+.push .when{float:right;font-size:.75rem;color:var(--ink-3)}
+.dialog{position:absolute;z-index:80;left:24px;right:24px;top:50%;transform:translateY(-50%) scale(.96);opacity:0;pointer-events:none;background:var(--paper);border-radius:22px;padding:20px;transition:all .2s;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+.dialog.on{opacity:1;pointer-events:auto;transform:translateY(-50%)}
+.dialog h2{margin:0 0 8px;font-size:1.2rem}.dialog p{margin:0 0 16px;color:var(--ink-2);line-height:1.45}
+
+.disclaimer{font-size:.78rem;color:var(--ink-3);line-height:1.45;padding:4px 4px 16px}
+.big-text{--fs:1.15rem}
+.big-text .screen{font-size:1.15rem}
+
+/* tablet / wide layout via container query */
+@container app (min-width: 700px){
+  .view{inset:0 0 0 96px}
+  .tabbar{top:0;bottom:0;right:auto;width:96px;height:auto;flex-direction:column;justify-content:flex-start;padding:60px 8px;border-top:0;border-right:1px solid var(--line);gap:8px}
+  .tabbar button{flex:0 0 72px}
+  .toast{left:auto;right:24px;width:380px;bottom:24px}
+  .today-grid{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:20px;padding:20px}
+  .today-grid .sky{border-radius:24px;height:100%;min-height:520px}
+  .today-grid .pad{padding:0}
+  .route-wide{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:20px;padding:0 20px 20px}
+  .route-wide .map{height:560px;border-radius:20px;overflow:hidden}
+  .route-wide .pad{padding:0}
+  .narrow{max-width:620px}
+  .sheet{left:50%;right:auto;width:520px;transform:translate(-50%,105%)}
+  .sheet.on{transform:translate(-50%,0)}
+  .app.onboarding .view{inset:0}
+  .ob{max-width:560px;margin:0 auto}
+}
+
+/* ---------- usability-test kit ---------- */
+.test-dock{display:none}
+.tpanel{background:var(--paper);border-radius:18px;padding:16px;box-shadow:var(--shadow);font-size:.88rem}
+.tpanel h3{margin:0 0 4px;font-size:1rem}
+.tpanel .task{border:1.5px solid var(--line);border-radius:12px;padding:10px 12px;margin-top:8px}
+.tpanel .task.cur{border-color:var(--glacier);background:var(--glacier-soft)}
+.tpanel .task.ok{opacity:.65}
+.tpanel .task b{display:block}
+.tpanel .stat{display:flex;gap:10px;font-weight:700;margin-top:6px;color:var(--ink-2)}
+.tpanel .btns{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.tpanel .btns button{border:0;border-radius:10px;padding:8px 10px;font-weight:700;background:#e9eef2}
+.tpanel .btns button.p{background:var(--glacier);color:#fff}
+.tpanel input{width:100%;padding:9px;border-radius:10px;border:1.5px solid var(--line);margin-top:6px}
+.sus{display:flex;flex-direction:column;gap:10px}
+.sus .q{font-size:.85rem}
+.sus .scale{display:flex;gap:4px;margin-top:4px}
+.sus .scale button{flex:1;border:1.5px solid var(--line);background:#fff;border-radius:8px;padding:6px 0;font-weight:700}
+.sus .scale button[aria-pressed=true]{background:var(--glacier);color:#fff;border-color:var(--glacier)}
+table.res{width:100%;border-collapse:collapse;font-size:.8rem;margin-top:8px}
+table.res td,table.res th{border-bottom:1px solid var(--line);padding:5px 4px;text-align:left}
+.mobile-test{position:absolute;z-index:90;right:10px;top:50px}
+.mobile-test > button{border:0;border-radius:99px;background:#1f2d3d;color:#fff;padding:8px 12px;font-weight:700;font-size:.8rem}
+.mobile-test .tpanel{position:absolute;right:0;top:40px;width:300px;max-height:70vh;overflow:auto}
+
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
+}
+.leaflet-container{font-family:inherit}
+.calm-tiles{filter:grayscale(.85) contrast(.92) brightness(1.06)}
+</style>
+</head>
+<body>
+<div class="stage">
+  <!-- presenter side: what this is -->
+  <aside class="stage-side" aria-label="About this prototype">
+    <div class="brand">
+      <svg width="44" height="44" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#24364a"/><path d="M6 46 22 24l8 10 8-14 20 26z" fill="#eef3f7"/><rect x="6" y="38" width="52" height="10" fill="#c9a36a" opacity=".7"/></svg>
+      <div><b>Smog Navigator</b><small>MVP · SDG 3.9 / 11.6 · Team 1</small></div>
+    </div>
+    <div>
+      <h2>Device</h2>
+      <div class="seg" role="group" aria-label="Device size">
+        <button id="dvPhone" aria-pressed="true">Phone 390</button>
+        <button id="dvTab" aria-pressed="false">Tablet 820</button>
+      </div>
+    </div>
+    <div>
+      <h2>Air data</h2>
+      <select id="scenario" aria-label="Air data scenario">
+        <option value="live">Live forecast — Almaty today</option>
+        <option value="winter">Typical winter evening (×2.6)</option>
+        <option value="severe">14 Jan 2025 — AQI 256 day</option>
+        <option value="clean">Clean day after snow</option>
+        <option value="offline">No internet (cached data)</option>
+        <option value="nogps">Location turned off</option>
+      </select>
+      <p style="margin-top:8px">Live data: Copernicus CAMS PM2.5 forecast via Open-Meteo, refreshed on open. Scenarios replay real Almaty conditions for the demo.</p>
+    </div>
+    <div class="facts">
+      <h2>Three MVP features</h2>
+      <strong>1 · Daily advice</strong> — plain answer for your risk group.<br>
+      <strong>2 · Clean Route</strong> — compares routes by smog exposure.<br>
+      <strong>3 · Smart alerts</strong> — forecast-based, with quiet hours.
+    </div>
+    <button class="btn sec" id="resetAll" style="margin-top:auto">Restart from onboarding</button>
+  </aside>
+
+  <div class="device" id="device">
+    <div class="screen" id="screen">
+      <div class="app onboarding" id="app">
+        <main class="view" id="v-ob" aria-label="Setup"></main>
+        <main class="view" id="v-today" hidden aria-label="Today"></main>
+        <main class="view" id="v-route" hidden aria-label="Clean Route"></main>
+        <main class="view" id="v-alerts" hidden aria-label="Alerts"></main>
+        <main class="view" id="v-me" hidden aria-label="Profile"></main>
+
+        <nav class="tabbar" aria-label="Main">
+          <button data-tab="today" aria-current="page"><span class="pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 19 9 9l4 5 3-4 6 9z"/><path d="M2 19h20"/></svg></span><span data-i="tabToday">Today</span></button>
+          <button data-tab="route"><span class="pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M8 19h7a3.5 3.5 0 0 0 0-7H9a3.5 3.5 0 0 1 0-7h7"/></svg></span><span data-i="tabRoute">Route</span></button>
+          <button data-tab="alerts"><span class="pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></span><span data-i="tabAlerts">Alerts</span></button>
+          <button data-tab="me"><span class="pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></span><span data-i="tabMe">Profile</span></button>
+        </nav>
+
+        <div class="scrim" id="scrim"></div>
+        <section class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle"><div class="grab"></div><div id="sheetBody"></div></section>
+        <section class="dialog" id="dialog" role="alertdialog" aria-modal="true" aria-labelledby="dlgTitle"></section>
+        <div class="toast" id="toast" role="status" aria-live="polite"><span id="toastText"></span><button id="toastUndo" hidden></button></div>
+        <div class="push" id="push" role="status" aria-live="polite"></div>
+      </div>
+    </div>
+  </div>
+
+  <aside class="stage-side" aria-label="Usability test">
+    <div class="test-dock" id="testDock"></div>
+    <div id="testIntro" class="facts">
+      <h2>Usability test mode</h2>
+      <p>Open with <strong>?test</strong> in the address to run a moderated test: 5 tasks, automatic time and completion, SUS questionnaire, CSV export.</p>
+      <p style="margin-top:10px"><a href="?test" style="color:var(--glacier);font-weight:700">Start test mode</a></p>
+    </div>
+  </aside>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script>
+/* ================================================================
+   DATA
+   ================================================================ */
+const SNAPSHOT = /*SNAPSHOT*/{"hourly":{"time":["2026-11-24T00:00","2026-11-24T01:00","2026-11-24T02:00","2026-11-24T03:00","2026-11-24T04:00","2026-11-24T05:00","2026-11-24T06:00","2026-11-24T07:00","2026-11-24T08:00","2026-11-24T09:00","2026-11-24T10:00","2026-11-24T11:00","2026-11-24T12:00","2026-11-24T13:00","2026-11-24T14:00","2026-11-24T15:00","2026-11-24T16:00","2026-11-24T17:00","2026-11-24T18:00","2026-11-24T19:00","2026-11-24T20:00","2026-11-24T21:00","2026-11-24T22:00","2026-11-24T23:00","2026-11-25T00:00","2026-11-25T01:00","2026-11-25T02:00","2026-11-25T03:00","2026-11-25T04:00","2026-11-25T05:00","2026-11-25T06:00","2026-11-25T07:00","2026-11-25T08:00","2026-11-25T09:00","2026-11-25T10:00","2026-11-25T11:00","2026-11-25T12:00","2026-11-25T13:00","2026-11-25T14:00","2026-11-25T15:00","2026-11-25T16:00","2026-11-25T17:00","2026-11-25T18:00","2026-11-25T19:00","2026-11-25T20:00","2026-11-25T21:00","2026-11-25T22:00","2026-11-25T23:00","2026-11-26T00:00","2026-11-26T01:00","2026-11-26T02:00","2026-11-26T03:00","2026-11-26T04:00","2026-11-26T05:00","2026-11-26T06:00","2026-11-26T07:00","2026-11-26T08:00","2026-11-26T09:00","2026-11-26T10:00","2026-11-26T11:00","2026-11-26T12:00","2026-11-26T13:00","2026-11-26T14:00","2026-11-26T15:00","2026-11-26T16:00","2026-11-26T17:00","2026-11-26T18:00","2026-11-26T19:00","2026-11-26T20:00","2026-11-26T21:00","2026-11-26T22:00","2026-11-26T23:00"],"pm2_5":[37.0,34.0,31.2,27.6,24.1,21.9,22.6,21.0,21.1,29.6,24.2,20.2,19.6,20.8,22.3,24.0,25.7,29.7,29.0,36.1,42.3,41.4,39.8,40.6,33.1,30.5,30.5,31.2,31.1,27.8,22.5,26.6,29.7,33.1,27.5,23.6,21.7,20.1,19.4,19.0,21.8,23.7,24.7,24.8,25.6,25.4,24.7,23.6,19.6,16.5,14.3,12.7,11.7,11.5,13.9,20.1,25.1,28.6,29.3,24.5,19.3,17.6,16.4,18.0,26.4,35.4,37.6,43.8,48.7,49.5,32.6,17.9],"us_aqi":[90,91,92,93,94,95,96,96,96,95,95,95,94,94,94,94,94,93,92,91,89,88,88,87,87,87,86,86,87,87,88,88,88,89,89,89,90,90,90,89,89,89,88,88,87,86,84,83,82,81,80,78,77,75,74,74,73,73,72,72,73,72,72,72,72,72,73,74,76,77,79,80]}};
+
+const I18N = {
+ en:{
+  undone2:"Change undone.",
+  whoX:"{x}× the WHO daily limit for PM2.5",whatMeans:"What does this mean?",freshAt:"Forecast for now · updated {t}",cachedAt:"Saved forecast from {t} — no internet",autosave:"Changes are saved as you make them. You can undo each one.",qSame:"Start and end can't be the same time.",mTitle:"What the number means",mLead:"AQI turns PM2.5 into a 0–500 scale. For you the line is stricter because of your risk profile.",mYou:"you are here",m0:"Air is clean. Go out.",m1:"Fine for most. Very sensitive people: shorter hard exercise.",m2:"Children, asthma, heart, 65+: keep outdoor time short.",m3:"Everyone: limit time outside. Close windows.",m4:"Stay inside if you can. Mask (FFP2) if you go out.",m5:"Health emergency level. Stay inside.",mWho:"WHO says PM2.5 should stay below 15 µg/m³ on average over a day.",
+  tabToday:"Today",tabRoute:"Route",tabAlerts:"Alerts",tabMe:"Profile",
+  obStep1:"Breathe easier in Almaty",obLead1:"We turn the smog forecast into plain advice: when to walk, which way to go, when to open the windows.",
+  obLang:"Language",obNext:"Continue",obBack:"Back",obSkip:"Skip",
+  obStep2:"Who should we protect?",obLead2:"Advice gets stricter for people at higher risk. Choose all that apply — you can change it later.",
+  pChild:"Child under 7",pChildS:"Lungs still growing",pAsthma:"Asthma or allergy",pAsthmaS:"Reacts to PM2.5 sooner",
+  pHeart:"Heart condition",pHeartS:"Smog raises the load",pOlder:"Age 65+",pOlderS:"Higher sensitivity",
+  pSport:"I run or cycle",pSportS:"You breathe 5× more air",pNone:"None of these",pNoneS:"General advice",
+  obStep3:"Where are you?",obLead3:"Smog in Almaty differs a lot by district: the north and west are usually worse than the foothills.",
+  useGps:"Use my location",useGpsS:"Only on this phone, never stored on a server",chooseDistrict:"Choose a district instead",
+  obStep4:"When should we warn you?",obLead4:"Alerts use the forecast, so you hear about bad air before it arrives.",
+  obDone:"Start using Smog Navigator",
+  district:"District",nearYou:"near you",
+  updated:"Updated",source:"PM2.5 forecast · Copernicus CAMS via Open-Meteo",notSensor:"This is a model forecast, not a sensor reading.",refresh:"Refresh",
+  mtVisible:"Mountains visible",mtHazy:"Mountains in haze",mtHidden:"Mountains hidden",
+  qWalk:"Can I go for a walk?",qWalkChild:"Walk with the child?",qAir:"When to air the flat?",qSport:"Outdoor training?",
+  walkOkUntil:"Yes, until {t}",walkOkAll:"Yes, all day",walkFrom:"Better from {t}",walkNo:"Better stay inside today",
+  airBest:"Best at {a}–{b}",airNone:"Keep windows closed today",
+  sportOk:"Yes, best at {t}",sportShort:"Short and easy only, best at {t}",sportNo:"Train indoors today",
+  next24:"Next 24 hours",pm:"PM2.5 µg/m³",bestMark:"best time",
+  cat0:"Good",cat1:"Moderate",cat2:"Unhealthy for sensitive groups",cat3:"Unhealthy",cat4:"Very unhealthy",cat5:"Hazardous",
+  h0:"Clear air. A good day to be outside.",h1:"Light haze. Fine for most people.",h2:"Haze is building. Keep walks with kids short.",
+  h3:"Smog is in. Limit time outside.",h4:"Heavy smog. Stay inside if you can.",h5:"Dangerous air. Stay inside, windows closed.",
+  offline:"No internet. Showing the forecast saved at {t}.",offlineAct:"Try again",
+  stale:"Data is {n} h old — advice may be out of date.",
+  noGps:"We can't find your location. Choose a district to keep getting advice.",noGpsAct:"Choose district",
+  rTitle:"Clean Route",rLead:"Compare ways to get there by how much smog you breathe, not only by time.",
+  from:"From",to:"To",walk:"Walk",bike:"Bike",
+  fastest:"Fastest",cleanest:"Cleanest",balanced:"Balanced",
+  min:"min",smog:"smog",vsFast:"vs fastest",same:"baseline",
+  startRoute:"Start this route",started:"Route started: {m} min, {p}% less smog than the fastest way.",startedFast:"Route started: {m} min.",undo:"Undo",undone:"Route cancelled.",
+  viaKurm:"Via Kurmangazy St",viaAbay:"Via Abay Ave",viaSat:"Via Satpayev St",whyKurm:"Quiet side streets one block from the avenue",whyAbay:"Along the avenue — heavy traffic all the way",whySat:"Longer, and Satpayev is a busy street",tagRec:"Least smog",tagFast:"Fastest",
+  rData:"Exposure = PM2.5 × time on each street. Main roads add ~40% from traffic.",
+  aTitle:"Alerts",aLead:"We warn you before the air gets worse — and stay quiet when you ask.",
+  aOn:"Smog alerts",aOnS:"Push notifications from the forecast",
+  aLevel:"Warn me when air becomes",aLvl1:"Bad for sensitive people",aLvl1S:"AQI above 100 — recommended for your profile",aLvl2:"Bad for everyone",aLvl2S:"AQI above 150",
+  aTypes:"What to tell me",aWorse:"Air gets worse in 2 hours",aWindow:"Best time to air the flat",aMorning:"Morning summary at 7:30",
+  quiet:"Quiet hours",quietS:"No alerts at night, except hazardous air",fromT:"from",toT:"to",
+  preview:"Preview an alert",save:"Save settings",saved:"Alert settings saved.",
+  pushWorse:"Air will get worse in 2 hours",pushWorseB:"PM2.5 rises to {v} around {t}. Finish your walk before then.",
+  meTitle:"Profile",meRisk:"Who we protect",meLang:"Language",meText:"Larger text",meTextS:"Makes all text 15% bigger",
+  meLoc:"Location",mePriv:"Your data",mePrivS:"Your health profile and location stay on this phone. We send the server only a district, never your exact position.",
+  meDel:"Delete all my data",delQ:"Delete all your data?",delP:"Your profile, alert settings and saved places will be removed from this phone. This cannot be undone.",
+  cancel:"Cancel",del:"Delete",deleted:"All data deleted.",
+  disclaimer:"Smog Navigator gives advice, not a medical diagnosis. If you have symptoms, talk to a doctor.",
+  edit:"Edit",done:"Done",
+  detailTitle:"Walk plan for today",detailLead:"Hours below your safe level are marked. Your level: {lvl}.",lvlSens:"stricter (sensitive profile)",lvlGen:"standard",
+  close:"Close",windowList:"Good windows today",noWindow:"No safe window in the next 24 hours.",
+  loading:"Loading the forecast…",err:"Couldn't load the forecast.",
+ },
+ ru:{
+  undone2:"Изменение отменено.",
+  whoX:"в {x} раза выше суточной нормы ВОЗ по PM2.5",whatMeans:"Что это значит?",freshAt:"Прогноз на сейчас · обновлено {t}",cachedAt:"Сохранённый прогноз от {t} — нет интернета",autosave:"Изменения сохраняются сразу. Каждое можно отменить.",qSame:"Начало и конец не могут совпадать.",mTitle:"Что значит это число",mLead:"AQI переводит PM2.5 в шкалу 0–500. Для вас граница строже — из-за группы риска.",mYou:"вы здесь",m0:"Воздух чистый. Можно гулять.",m1:"Большинству нормально. Очень чувствительным — меньше нагрузки.",m2:"Дети, астма, сердце, 65+: на улице недолго.",m3:"Всем: меньше на улице, окна закрыть.",m4:"Оставайтесь дома. На улице — маска FFP2.",m5:"Уровень опасности для здоровья. Дома.",mWho:"По ВОЗ PM2.5 в среднем за сутки не должен превышать 15 мкг/м³.",
+  tabToday:"Сегодня",tabRoute:"Маршрут",tabAlerts:"Оповещения",tabMe:"Профиль",
+  obStep1:"Дышите легче в Алматы",obLead1:"Превращаем прогноз смога в простые советы: когда гулять, куда идти, когда открыть окна.",
+  obLang:"Язык",obNext:"Дальше",obBack:"Назад",obSkip:"Пропустить",
+  obStep2:"Кого защищаем?",obLead2:"Для людей в группе риска советы строже. Выберите всё, что подходит — это можно поменять позже.",
+  pChild:"Ребёнок до 7 лет",pChildS:"Лёгкие ещё растут",pAsthma:"Астма или аллергия",pAsthmaS:"Реагирует на PM2.5 раньше",
+  pHeart:"Болезни сердца",pHeartS:"Смог даёт нагрузку",pOlder:"Возраст 65+",pOlderS:"Выше чувствительность",
+  pSport:"Бегаю или катаюсь",pSportS:"Дышите в 5 раз больше",pNone:"Ничего из этого",pNoneS:"Общие советы",
+  obStep3:"Где вы?",obLead3:"Смог в Алматы сильно зависит от района: север и запад обычно грязнее предгорий.",
+  useGps:"Определить по геолокации",useGpsS:"Только на телефоне, на сервер не уходит",chooseDistrict:"Выбрать район вручную",
+  obStep4:"Когда предупреждать?",obLead4:"Оповещения идут по прогнозу — вы узнаете о смоге до того, как он придёт.",
+  obDone:"Начать пользоваться",
+  district:"Район",nearYou:"рядом с вами",
+  updated:"Обновлено",source:"Прогноз PM2.5 · Copernicus CAMS через Open-Meteo",notSensor:"Это прогноз модели, а не показание датчика.",refresh:"Обновить",
+  mtVisible:"Горы видно",mtHazy:"Горы в дымке",mtHidden:"Гор не видно",
+  qWalk:"Можно гулять?",qWalkChild:"Гулять с ребёнком?",qAir:"Когда проветрить?",qSport:"Тренировка на улице?",
+  walkOkUntil:"Да, до {t}",walkOkAll:"Да, весь день",walkFrom:"Лучше с {t}",walkNo:"Сегодня лучше дома",
+  airBest:"Лучше в {a}–{b}",airNone:"Окна сегодня не открывать",
+  sportOk:"Да, лучше в {t}",sportShort:"Только легко и недолго, в {t}",sportNo:"Сегодня тренируйтесь в зале",
+  next24:"Ближайшие 24 часа",pm:"PM2.5 мкг/м³",bestMark:"лучшее время",
+  cat0:"Хорошо",cat1:"Умеренно",cat2:"Вредно для чувствительных",cat3:"Вредно",cat4:"Очень вредно",cat5:"Опасно",
+  h0:"Чистый воздух. Хороший день, чтобы быть на улице.",h1:"Лёгкая дымка. Большинству можно всё.",h2:"Дымка сгущается. С детьми гуляйте недолго.",
+  h3:"Пришёл смог. Меньше времени на улице.",h4:"Сильный смог. Оставайтесь дома, если можете.",h5:"Опасный воздух. Дома, окна закрыты.",
+  offline:"Нет интернета. Показываем прогноз от {t}.",offlineAct:"Повторить",
+  stale:"Данным {n} ч — советы могли устареть.",
+  noGps:"Не можем определить, где вы. Выберите район, и советы продолжат приходить.",noGpsAct:"Выбрать район",
+  rTitle:"Чистый маршрут",rLead:"Сравните пути не только по времени, но и по тому, сколько смога вы вдохнёте.",
+  from:"Откуда",to:"Куда",walk:"Пешком",bike:"Велосипед",
+  fastest:"Быстрый",cleanest:"Чистый",balanced:"Средний",
+  min:"мин",smog:"смога",vsFast:"к быстрому",same:"база",
+  startRoute:"Идти этим путём",started:"Маршрут начат: {m} мин, на {p}% меньше смога, чем быстрым путём.",startedFast:"Маршрут начат: {m} мин.",undo:"Отменить",undone:"Маршрут отменён.",
+  viaKurm:"По Курмангазы",viaAbay:"По проспекту Абая",viaSat:"По Сатпаева",whyKurm:"Тихие улицы в квартале от проспекта",whyAbay:"Вдоль проспекта — плотный трафик всю дорогу",whySat:"Дольше, и Сатпаева — оживлённая улица",tagRec:"Меньше смога",tagFast:"Быстрее всех",
+  rData:"Вдох = PM2.5 × время на каждой улице. Проспекты добавляют ~40% из-за машин.",
+  aTitle:"Оповещения",aLead:"Предупредим до того, как воздух испортится, и помолчим, когда попросите.",
+  aOn:"Оповещения о смоге",aOnS:"Пуш-уведомления по прогнозу",
+  aLevel:"Предупреждать, когда воздух",aLvl1:"Вреден для чувствительных",aLvl1S:"AQI выше 100 — советуем для вашего профиля",aLvl2:"Вреден для всех",aLvl2S:"AQI выше 150",
+  aTypes:"О чём сообщать",aWorse:"Через 2 часа станет хуже",aWindow:"Лучшее время проветрить",aMorning:"Утренняя сводка в 7:30",
+  quiet:"Тихие часы",quietS:"Ночью без оповещений, кроме опасного воздуха",fromT:"с",toT:"до",
+  preview:"Показать пример",save:"Сохранить",saved:"Настройки оповещений сохранены.",
+  pushWorse:"Через 2 часа воздух станет хуже",pushWorseB:"PM2.5 вырастет до {v} около {t}. Закончите прогулку раньше.",
+  meTitle:"Профиль",meRisk:"Кого защищаем",meLang:"Язык",meText:"Крупный текст",meTextS:"Весь текст на 15% больше",
+  meLoc:"Местоположение",mePriv:"Ваши данные",mePrivS:"Профиль здоровья и геолокация остаются на телефоне. На сервер уходит только район, не точный адрес.",
+  meDel:"Удалить все мои данные",delQ:"Удалить все данные?",delP:"Профиль, настройки оповещений и места удалятся с телефона. Это нельзя отменить.",
+  cancel:"Отмена",del:"Удалить",deleted:"Все данные удалены.",
+  disclaimer:"Smog Navigator даёт советы, а не медицинский диагноз. Если есть симптомы — обратитесь к врачу.",
+  edit:"Изменить",done:"Готово",
+  detailTitle:"План прогулки на сегодня",detailLead:"Отмечены часы ниже вашего безопасного уровня. Ваш уровень: {lvl}.",lvlSens:"строже (группа риска)",lvlGen:"обычный",
+  close:"Закрыть",windowList:"Хорошие окна сегодня",noWindow:"В ближайшие 24 часа безопасного окна нет.",
+  loading:"Загружаем прогноз…",err:"Не удалось загрузить прогноз.",
+ },
+ kk:{
+  undone2:"Өзгеріс болдырылмады.",
+  whoX:"PM2.5 бойынша ДДСҰ тәуліктік нормасынан {x} есе жоғары",whatMeans:"Бұл нені білдіреді?",freshAt:"Қазіргі болжам · жаңартылды {t}",cachedAt:"{t} сақталған болжам — интернет жоқ",autosave:"Өзгерістер бірден сақталады. Әрқайсысын болдырмауға болады.",qSame:"Басы мен соңы бірдей болмауы керек.",mTitle:"Бұл сан нені білдіреді",mLead:"AQI PM2.5-ті 0–500 шкаласына айналдырады. Сіз қауіп тобындасыз, сондықтан шек қатаңырақ.",mYou:"сіз осындасыз",m0:"Ауа таза. Серуендеңіз.",m1:"Көпшілікке қалыпты. Өте сезімталдарға жүктемені азайту.",m2:"Балалар, демікпе, жүрек, 65+: далада аз болыңыз.",m3:"Барлығына: далада азырақ, терезе жабық.",m4:"Үйде болыңыз. Далада — FFP2 маска.",m5:"Денсаулыққа қауіпті деңгей. Үйде.",mWho:"ДДСҰ бойынша PM2.5 тәулік бойы орта есеппен 15 мкг/м³-ден аспауы керек.",
+  tabToday:"Бүгін",tabRoute:"Бағыт",tabAlerts:"Хабарлама",tabMe:"Профиль",
+  obStep1:"Алматыда жеңіл тыныс алыңыз",obLead1:"Түтін болжамын қарапайым кеңеске айналдырамыз: қашан серуендеу, қай жолмен жүру, қашан терезе ашу.",
+  obLang:"Тіл",obNext:"Әрі қарай",obBack:"Артқа",obSkip:"Өткізу",
+  obStep2:"Кімді қорғаймыз?",obLead2:"Қауіп тобындағылар үшін кеңес қатаңырақ. Сәйкесін таңдаңыз — кейін өзгертуге болады.",
+  pChild:"7 жасқа дейінгі бала",pChildS:"Өкпесі әлі өсуде",pAsthma:"Демікпе не аллергия",pAsthmaS:"PM2.5-ке тез сезімтал",
+  pHeart:"Жүрек ауруы",pHeartS:"Түтін жүктеме береді",pOlder:"65+ жас",pOlderS:"Сезімталдық жоғары",
+  pSport:"Жүгіремін не велосипед",pSportS:"Ауаны 5 есе көп жұтасыз",pNone:"Бұлардың ешқайсысы",pNoneS:"Жалпы кеңес",
+  obStep3:"Қай жердесіз?",obLead3:"Алматыда түтін ауданға қарай қатты өзгереді: солтүстік пен батыс тау бөктерінен ластау.",
+  useGps:"Геолокацияны қолдану",useGpsS:"Тек телефонда, серверге жіберілмейді",chooseDistrict:"Ауданды өзім таңдаймын",
+  obStep4:"Қашан ескертейік?",obLead4:"Хабарлама болжам бойынша келеді — түтін келмей тұрып білесіз.",
+  obDone:"Қолдануды бастау",
+  district:"Аудан",nearYou:"жаныңызда",
+  updated:"Жаңартылды",source:"PM2.5 болжамы · Copernicus CAMS, Open-Meteo арқылы",notSensor:"Бұл модель болжамы, датчик көрсеткіші емес.",refresh:"Жаңарту",
+  mtVisible:"Тау көрінеді",mtHazy:"Тау тұманда",mtHidden:"Тау көрінбейді",
+  qWalk:"Серуендеуге бола ма?",qWalkChild:"Баламен серуендеу?",qAir:"Қашан желдету?",qSport:"Далада жаттығу?",
+  walkOkUntil:"Иә, {t} дейін",walkOkAll:"Иә, күні бойы",walkFrom:"{t} бастап жақсы",walkNo:"Бүгін үйде болған жөн",
+  airBest:"Ең жақсысы {a}–{b}",airNone:"Бүгін терезені ашпаңыз",
+  sportOk:"Иә, ең жақсысы {t}",sportShort:"Тек жеңіл әрі қысқа, {t}",sportNo:"Бүгін залда жаттығыңыз",
+  next24:"Алдағы 24 сағат",pm:"PM2.5 мкг/м³",bestMark:"ең жақсы уақыт",
+  cat0:"Жақсы",cat1:"Орташа",cat2:"Сезімталдарға зиян",cat3:"Зиян",cat4:"Өте зиян",cat5:"Қауіпті",
+  h0:"Ауа таза. Далада болуға жақсы күн.",h1:"Жеңіл тұман. Көпшілікке бәрі болады.",h2:"Тұман қоюлануда. Балалармен аз серуендеңіз.",
+  h3:"Түтін келді. Далада азырақ болыңыз.",h4:"Қалың түтін. Мүмкін болса, үйде болыңыз.",h5:"Қауіпті ауа. Үйде, терезе жабық.",
+  offline:"Интернет жоқ. {t} сақталған болжам көрсетілуде.",offlineAct:"Қайталау",
+  stale:"Дерек {n} сағ бұрын — кеңес ескірген болуы мүмкін.",
+  noGps:"Орныңызды таба алмадық. Кеңес алу үшін ауданды таңдаңыз.",noGpsAct:"Ауданды таңдау",
+  rTitle:"Таза бағыт",rLead:"Жолдарды уақыт бойынша ғана емес, қанша түтін жұтатыныңыз бойынша салыстырыңыз.",
+  from:"Қайдан",to:"Қайда",walk:"Жаяу",bike:"Велосипед",
+  fastest:"Жылдам",cleanest:"Таза",balanced:"Орташа",
+  min:"мин",smog:"түтін",vsFast:"жылдамға қарай",same:"негіз",
+  startRoute:"Осы жолмен жүру",started:"Бағыт басталды: {m} мин, жылдам жолдан {p}% аз түтін.",startedFast:"Бағыт басталды: {m} мин.",undo:"Болдырмау",undone:"Бағыт тоқтатылды.",
+  viaKurm:"Құрманғазы көшесімен",viaAbay:"Абай даңғылымен",viaSat:"Сәтбаев көшесімен",whyKurm:"Даңғылдан бір квартал тыныш көшелер",whyAbay:"Даңғыл бойымен — көлік көп",whySat:"Ұзағырақ, Сәтбаев көшесі қарбалас",tagRec:"Түтін аз",tagFast:"Ең жылдам",
+  rData:"Жұтылған түтін = PM2.5 × әр көшедегі уақыт. Даңғылдар көліктен ~40% қосады.",
+  aTitle:"Хабарлама",aLead:"Ауа нашарламай тұрып ескертеміз, сұрасаңыз — үндемейміз.",
+  aOn:"Түтін туралы хабарлама",aOnS:"Болжам бойынша push-хабарлама",
+  aLevel:"Ауа қашан ескерту керек",aLvl1:"Сезімталдарға зиян",aLvl1S:"AQI 100-ден жоғары — профиліңізге ұсынылады",aLvl2:"Барлығына зиян",aLvl2S:"AQI 150-ден жоғары",
+  aTypes:"Не туралы хабарлау",aWorse:"2 сағаттан кейін нашарлайды",aWindow:"Желдетуге ең жақсы уақыт",aMorning:"Таңғы шолу 7:30",
+  quiet:"Тыныш сағаттар",quietS:"Түнде хабарлама жоқ, қауіпті ауадан басқа",fromT:"бастап",toT:"дейін",
+  preview:"Мысал көрсету",save:"Сақтау",saved:"Хабарлама баптаулары сақталды.",
+  pushWorse:"2 сағаттан кейін ауа нашарлайды",pushWorseB:"PM2.5 шамамен {t} кезінде {v} дейін көтеріледі. Серуенді ертерек аяқтаңыз.",
+  meTitle:"Профиль",meRisk:"Кімді қорғаймыз",meLang:"Тіл",meText:"Үлкен мәтін",meTextS:"Барлық мәтін 15% үлкен",
+  meLoc:"Орналасу",mePriv:"Деректеріңіз",mePrivS:"Денсаулық профилі мен орныңыз телефонда қалады. Серверге тек аудан жіберіледі.",
+  meDel:"Барлық деректерімді жою",delQ:"Барлық деректі жою керек пе?",delP:"Профиль, баптаулар мен орындар телефоннан өшеді. Мұны қайтару мүмкін емес.",
+  cancel:"Бас тарту",del:"Жою",deleted:"Барлық дерек жойылды.",
+  disclaimer:"Smog Navigator кеңес береді, медициналық диагноз емес. Белгілер болса, дәрігерге барыңыз.",
+  edit:"Өзгерту",done:"Дайын",
+  detailTitle:"Бүгінгі серуен жоспары",detailLead:"Қауіпсіз деңгейден төмен сағаттар белгіленген. Деңгейіңіз: {lvl}.",lvlSens:"қатаң (қауіп тобы)",lvlGen:"қалыпты",
+  close:"Жабу",windowList:"Бүгінгі жақсы уақыт",noWindow:"Алдағы 24 сағатта қауіпсіз уақыт жоқ.",
+  loading:"Болжам жүктелуде…",err:"Болжам жүктелмеді.",
+ }
+};
+
+const DISTRICTS = [
+  {id:"bostandyk",name:{en:"Bostandyk",ru:"Бостандыкский",kk:"Бостандық"},k:0.85},
+  {id:"medeu",name:{en:"Medeu",ru:"Медеуский",kk:"Медеу"},k:0.9},
+  {id:"almaly",name:{en:"Almaly",ru:"Алмалинский",kk:"Алмалы"},k:1.0},
+  {id:"nauryzbay",name:{en:"Nauryzbay",ru:"Наурызбайский",kk:"Наурызбай"},k:1.0},
+  {id:"auezov",name:{en:"Auezov",ru:"Ауэзовский",kk:"Әуезов"},k:1.15},
+  {id:"turksib",name:{en:"Turksib",ru:"Турксибский",kk:"Түрксіб"},k:1.2},
+  {id:"zhetysu",name:{en:"Zhetysu",ru:"Жетысуский",kk:"Жетісу"},k:1.25},
+  {id:"alatau",name:{en:"Alatau",ru:"Алатауский",kk:"Алатау"},k:1.3},
+];
+
+/* Demo places and three street-following routes (approximate geometry).
+   Each point: [lat, lon, trafficFactor for the segment that ENDS here]. */
+const PLACES = {
+  home:{en:"Home · Baitursynuly St",ru:"Дом · ул. Байтурсынулы",kk:"Үй · Байтұрсынұлы к.",ll:[43.24178,76.92474]},
+  kg:{en:"Kindergarten · Abay / Manas",ru:"Детсад · Абая / Манаса",kk:"Балабақша · Абай / Манас",ll:[43.24074,76.90451]},
+};
+/* Real walking geometry (OSRM foot, OpenStreetMap). Third value = traffic factor of the nearest street:
+   avenue 1.45, main street 1.15–1.3, side street 0.9, inner yard/path 0.85. */
+const ROUTES = [
+  {id:"kurm",name:"viaKurm",why:"whyKurm",pts:[[43.24178,76.92474,0.9],[43.24213,76.9247,0.9],[43.24213,76.92463,0.9],[43.24257,76.92457,0.9],[43.24301,76.92451,0.9],[43.243,76.92447,0.9],[43.24295,76.92372,0.9],[43.24295,76.92366,0.9],[43.24294,76.92362,0.9],[43.24294,76.92352,0.9],[43.243,76.92351,0.9],[43.24307,76.9235,0.9],[43.2431,76.9235,0.9],[43.24313,76.92349,0.9],[43.24318,76.92349,0.9],[43.24318,76.92343,0.9],[43.24311,76.92249,0.9],[43.24307,76.92203,0.9],[43.24306,76.92186,0.9],[43.24305,76.92171,0.9],[43.243,76.92099,0.9],[43.24295,76.92028,0.9],[43.24294,76.92017,0.9],[43.24294,76.92009,0.9],[43.24293,76.92001,0.9],[43.24291,76.91967,0.9],[43.24291,76.91964,0.9],[43.24297,76.9196,0.9],[43.24301,76.91961,0.9],[43.24303,76.91962,0.9],[43.24305,76.91963,0.9],[43.24318,76.91961,0.9],[43.24324,76.9196,0.9],[43.24337,76.91957,0.85],[43.24357,76.9195,0.85],[43.24378,76.91941,0.9],[43.24421,76.9192,0.9],[43.24429,76.91912,0.9],[43.24434,76.91906,0.9],[43.24431,76.91856,0.9],[43.24427,76.91801,0.9],[43.24427,76.918,0.9],[43.24426,76.91772,0.9],[43.24422,76.91704,1.15],[43.24419,76.91623,1.15],[43.24416,76.91607,0.9],[43.24414,76.91597,0.9],[43.24416,76.91592,1.15],[43.24412,76.91515,0.9],[43.24408,76.91456,1.15],[43.24404,76.91397,1.15],[43.24404,76.91385,0.9],[43.24403,76.91375,0.9],[43.24398,76.91315,1.15],[43.24394,76.91255,1.15],[43.24389,76.91195,1.15],[43.24385,76.91134,1.15],[43.24383,76.91118,0.9],[43.24379,76.91068,1.15],[43.24374,76.91019,1.15],[43.24369,76.90969,1.15],[43.24365,76.90919,1.15],[43.24362,76.9089,1.15],[43.24358,76.90824,1.15],[43.24356,76.90805,0.9],[43.24355,76.90792,0.9],[43.24355,76.90788,0.9],[43.24351,76.90727,1.15],[43.24346,76.90667,1.15],[43.24342,76.90606,0.9],[43.24338,76.90548,0.9],[43.24333,76.90488,1.15],[43.24329,76.90427,1.15],[43.24324,76.90366,1.15],[43.24324,76.9036,1.15],[43.24282,76.90366,1.15],[43.2424,76.90372,1.15],[43.24198,76.90378,1.15],[43.24157,76.90383,0.9],[43.24119,76.90388,1.15],[43.24082,76.90393,0.9],[43.24082,76.90412,0.9],[43.24081,76.90426,0.9],[43.24076,76.90431,0.9],[43.24073,76.90433,0.9],[43.24074,76.90451,0.9]]},
+  {id:"abay",name:"viaAbay",why:"whyAbay",pts:[[43.24178,76.92474,0.9],[43.24213,76.9247,0.9],[43.24213,76.92463,0.9],[43.24212,76.92439,0.9],[43.24208,76.92373,0.9],[43.24157,76.9238,0.9],[43.24099,76.92387,0.9],[43.24097,76.92364,1.45],[43.24088,76.92366,1.45],[43.24084,76.92366,1.45],[43.24072,76.92368,1.45],[43.24065,76.92368,1.45],[43.24059,76.92369,0.9],[43.24059,76.9236,0.9],[43.24059,76.92358,1.45],[43.24055,76.92301,1.45],[43.24052,76.92245,1.45],[43.2405,76.92212,1.45],[43.24045,76.92159,1.45],[43.24045,76.92156,1.45],[43.24039,76.92063,1.45],[43.24037,76.92019,1.45],[43.24034,76.91979,1.45],[43.24038,76.91972,1.45],[43.24038,76.91967,1.45],[43.24038,76.91963,1.45],[43.24035,76.9193,1.45],[43.24035,76.91924,1.45],[43.24033,76.91902,1.45],[43.24025,76.91804,1.45],[43.24024,76.91793,1.45],[43.24023,76.91787,1.45],[43.24022,76.91771,1.45],[43.24022,76.91768,1.45],[43.24018,76.91716,1.45],[43.24014,76.91668,1.45],[43.24014,76.91666,1.45],[43.24013,76.91659,1.45],[43.24011,76.9163,1.45],[43.24005,76.91614,1.45],[43.24001,76.91605,1.45],[43.23997,76.91597,1.45],[43.23981,76.91582,1.45],[43.2399,76.91564,1.45],[43.24004,76.91552,1.45],[43.24006,76.91551,1.45],[43.24005,76.91511,1.45],[43.24005,76.91483,1.45],[43.24005,76.91456,1.45],[43.24004,76.91437,1.45],[43.23999,76.91387,1.45],[43.23994,76.91337,1.45],[43.23992,76.91318,1.45],[43.23988,76.91267,1.45],[43.23987,76.91253,1.45],[43.23987,76.91252,1.45],[43.23984,76.91197,1.45],[43.2398,76.91142,1.45],[43.23978,76.91096,1.45],[43.23974,76.91025,1.45],[43.23969,76.90964,1.45],[43.23962,76.90877,1.45],[43.23962,76.9087,1.45],[43.23961,76.90859,1.45],[43.23961,76.90856,1.45],[43.23961,76.90852,1.45],[43.2396,76.90843,1.45],[43.23971,76.90842,1.45],[43.23979,76.90841,1.45],[43.23987,76.9084,1.45],[43.23996,76.90833,1.45],[43.24002,76.90832,1.45],[43.24005,76.90832,1.45],[43.24011,76.90831,1.45],[43.24006,76.9076,1.45],[43.24002,76.90688,1.45],[43.23991,76.9069,1.45],[43.23987,76.90616,1.45],[43.24001,76.90606,1.45],[43.24005,76.90602,1.45],[43.24002,76.90539,1.45],[43.23998,76.90475,1.45],[43.2399,76.90477,1.45],[43.23989,76.90477,1.45],[43.23987,76.90478,1.45],[43.23986,76.90472,1.45],[43.23986,76.90468,1.45],[43.23986,76.90466,1.45],[43.23984,76.90432,1.45],[43.23983,76.90414,1.45],[43.23983,76.90408,1.45],[43.24027,76.90401,1.45],[43.24071,76.90395,0.9],[43.24082,76.90393,0.9],[43.24082,76.90412,0.9],[43.24081,76.90426,0.9],[43.24076,76.90431,1.45],[43.24073,76.90433,1.45],[43.24074,76.90451,1.45]]},
+  {id:"sat",name:"viaSat",why:"whySat",pts:[[43.24178,76.92474,0.9],[43.24213,76.9247,0.9],[43.24213,76.92463,0.9],[43.24212,76.92439,0.9],[43.24208,76.92373,0.9],[43.24157,76.9238,0.9],[43.24099,76.92387,0.9],[43.24097,76.92364,1.45],[43.24088,76.92366,1.45],[43.24084,76.92366,1.45],[43.24072,76.92368,1.45],[43.24065,76.92368,1.45],[43.24059,76.92369,0.9],[43.24059,76.9236,0.9],[43.24041,76.92363,0.9],[43.23993,76.92368,0.9],[43.23971,76.9237,0.9],[43.23944,76.92374,0.9],[43.23941,76.92365,0.9],[43.23937,76.92356,0.9],[43.23933,76.92347,0.9],[43.23927,76.92338,0.9],[43.23922,76.9233,0.9],[43.23915,76.92322,0.9],[43.23908,76.92315,0.9],[43.23903,76.92312,0.9],[43.239,76.9231,0.9],[43.23893,76.92305,0.9],[43.23883,76.923,0.9],[43.23878,76.92297,0.9],[43.23872,76.92295,0.9],[43.23868,76.92294,0.9],[43.23863,76.92294,0.9],[43.23828,76.92296,0.9],[43.23825,76.92256,0.9],[43.23786,76.9226,0.9],[43.23761,76.92263,0.9],[43.23756,76.92264,0.9],[43.23754,76.92228,0.9],[43.23752,76.92226,0.9],[43.23749,76.92225,0.9],[43.23738,76.92226,1.3],[43.2373,76.92227,1.3],[43.23695,76.92232,1.3],[43.23692,76.92234,1.3],[43.23683,76.92138,1.3],[43.23682,76.92122,1.3],[43.2368,76.92102,1.3],[43.2368,76.9209,1.3],[43.23677,76.92057,1.3],[43.23676,76.92044,1.3],[43.23672,76.91989,1.3],[43.23667,76.91934,1.3],[43.23663,76.91852,1.3],[43.23662,76.91846,1.3],[43.23662,76.91839,1.3],[43.23661,76.91812,1.3],[43.23659,76.91773,1.3],[43.23657,76.91734,1.3],[43.23655,76.91704,1.3],[43.23654,76.91626,1.3],[43.23654,76.9162,1.3],[43.23654,76.91617,1.3],[43.23654,76.91608,1.3],[43.23654,76.91596,1.3],[43.23653,76.91568,1.3],[43.23652,76.91547,1.3],[43.23654,76.91536,1.3],[43.23657,76.91516,1.3],[43.23667,76.9149,1.3],[43.2367,76.91487,1.3],[43.23675,76.91479,1.3],[43.23691,76.91453,1.3],[43.23696,76.91452,1.3],[43.23697,76.9145,1.3],[43.23698,76.91448,1.3],[43.237,76.91446,1.3],[43.23707,76.91443,1.3],[43.23728,76.91435,1.3],[43.23726,76.9143,1.3],[43.23723,76.91424,1.3],[43.23722,76.91421,1.3],[43.2371,76.91406,1.3],[43.23695,76.91386,1.3],[43.23692,76.91382,1.3],[43.23684,76.91376,1.3],[43.23682,76.9137,1.3],[43.23682,76.91365,1.3],[43.23682,76.91354,1.3],[43.23682,76.91344,1.3],[43.23693,76.91335,1.3],[43.23698,76.91327,1.3],[43.23698,76.91321,1.3],[43.23696,76.91303,1.3],[43.23677,76.91252,1.3],[43.23664,76.91223,1.3],[43.23645,76.91182,1.3],[43.23622,76.91141,0.9],[43.23595,76.91092,0.9],[43.23594,76.91089,0.9],[43.23592,76.91086,0.9],[43.23584,76.91072,0.9],[43.2358,76.91062,0.9],[43.2361,76.91037,1.3],[43.23606,76.91005,1.3],[43.23605,76.90999,1.3],[43.23604,76.90989,0.9],[43.23603,76.9098,0.9],[43.23601,76.90945,0.9],[43.23601,76.90929,1.3],[43.23607,76.90928,0.9],[43.23605,76.90908,0.9],[43.23604,76.90894,0.9],[43.23601,76.90853,0.9],[43.23596,76.90799,1.3],[43.23591,76.90745,0.9],[43.23587,76.90687,1.3],[43.23583,76.90628,1.3],[43.23578,76.90569,0.9],[43.23608,76.90564,0.9],[43.23623,76.90562,0.9],[43.23626,76.90596,0.9],[43.2369,76.90595,1.3],[43.23699,76.90595,1.3],[43.2371,76.90594,1.3],[43.23716,76.90597,1.3],[43.2372,76.90609,1.3],[43.23723,76.9065,1.3],[43.2376,76.90649,0.9],[43.23758,76.90612,0.9],[43.23753,76.9054,0.9],[43.23746,76.90442,0.9],[43.23757,76.90441,0.9],[43.23806,76.90434,1.15],[43.23855,76.90427,0.9],[43.23912,76.90419,1.15],[43.23924,76.90422,1.15],[43.2394,76.9042,1.45],[43.23948,76.90419,1.45],[43.23956,76.90418,1.15],[43.23967,76.90416,1.45],[43.23973,76.90415,1.45],[43.23979,76.90414,1.45],[43.23983,76.90414,1.45],[43.23983,76.90408,1.45],[43.24027,76.90401,0.9],[43.24071,76.90395,0.9],[43.24082,76.90393,0.9],[43.24082,76.90412,0.9],[43.24081,76.90426,0.9],[43.24076,76.90431,0.9],[43.24073,76.90433,0.9],[43.24074,76.90451,0.9]]},
+];
+
+/* ================================================================
+   STATE
+   ================================================================ */
+const DEF = {lang:"en",onboarded:false,risk:{child:true,asthma:false,heart:false,older:false,sport:false,none:false},
+  loc:"gps",district:"bostandyk",alerts:{on:true,level:1,worse:true,window:true,morning:false,qFrom:"22:00",qTo:"07:00"},bigText:false};
+let S = load();
+function load(){try{return Object.assign(structuredClone(DEF),JSON.parse(localStorage.getItem("sn_state")||"{}"))}catch(e){return structuredClone(DEF)}}
+function save(){localStorage.setItem("sn_state",JSON.stringify(S))}
+let air = null;            // {times:[], pm:[], fetchedAt, cachedAt, offline}
+let scenario = "live";
+let obStep = 0;
+let currentTab = "today";
+let selRoute = "kurm";
+let travelMode = "walk";
+let map = null, mapLayers = [];
+
+const t = (k,vars)=>{let s=(I18N[S.lang]&&I18N[S.lang][k])||I18N.en[k]||k; if(vars) for(const v in vars) s=s.replace("{"+v+"}",vars[v]); return s};
+const $ = (s,r=document)=>r.querySelector(s);
+const esc = s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+/* ================================================================
+   AIR DATA
+   ================================================================ */
+// US EPA 2024 PM2.5 breakpoints
+const BP=[[0,9,0,50],[9.1,35.4,51,100],[35.5,55.4,101,150],[55.5,125.4,151,200],[125.5,225.4,201,300],[225.5,325.4,301,500]];
+function aqi(pm){pm=Math.max(0,pm);for(const [cl,ch,il,ih] of BP){if(pm<=ch+0.05)return Math.round((ih-il)/(ch-cl)*(Math.max(pm,cl)-cl)+il)}return 500}
+function cat(pm){const a=aqi(pm);return a<=50?0:a<=100?1:a<=150?2:a<=200?3:a<=300?4:5}
+const CATCOL=["var(--q0)","var(--q1)","var(--q2)","var(--q3)","var(--q4)","var(--q5)"];
+const SCN={live:1,winter:2.6,severe:7.4,clean:0.32,offline:1,nogps:1};
+function sensitive(){const r=S.risk;return r.child||r.asthma||r.heart||r.older}
+function limitPM(){return sensitive()?35.4:55.4}   // safe ceiling for outdoor time
+function distK(){return (DISTRICTS.find(d=>d.id===S.district)||DISTRICTS[0]).k}
+
+async function fetchAir(){
+  const url="https://air-quality-api.open-meteo.com/v1/air-quality?latitude=43.238&longitude=76.889&hourly=pm2_5&timezone=Asia%2FAlmaty&forecast_days=3";
+  try{
+    if(scenario==="offline") throw new Error("offline");
+    const ctl=new AbortController(); const to=setTimeout(()=>ctl.abort(),6000);
+    const r=await fetch(url,{signal:ctl.signal}); clearTimeout(to);
+    if(!r.ok) throw new Error(r.status);
+    const d=await r.json();
+    localStorage.setItem("sn_cache",JSON.stringify({d,at:Date.now()}));
+    return {d,offline:false,at:Date.now()};
+  }catch(e){
+    const c=JSON.parse(localStorage.getItem("sn_cache")||"null");
+    if(c) return {d:c.d,offline:true,at:c.at};
+    if(SNAPSHOT) return {d:SNAPSHOT,offline:true,at:null};
+    throw e;
+  }
+}
+function buildAir(res){
+  const h=res.d.hourly, now=new Date();
+  // index of current hour in Almaty time (data is local time strings)
+  const nowKey=almatyHourKey(now);
+  let i0=h.time.findIndex(x=>x===nowKey); if(i0<0) i0=Math.min(h.time.length-25,new Date().getHours());
+  const k=SCN[scenario]*distK();
+  const times=h.time.slice(i0,i0+25), pm=h.pm2_5.slice(i0,i0+25).map(v=>Math.round(v*k*10)/10);
+  return {times,pm,offline:res.offline,at:res.at,genTime:h.time[i0]};
+}
+function almatyHourKey(d){
+  const p=new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Almaty",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",hour12:false}).formatToParts(d);
+  const g=n=>p.find(x=>x.type===n).value; return `${g("year")}-${g("month")}-${g("day")}T${g("hour")==="24"?"00":g("hour")}:00`;
+}
+const hh = s=>s.slice(11,16);
+
+function advice(){
+  const L=limitPM(), pm=air.pm, T=air.times;
+  // walk
+  let walk;
+  if(pm[0]<=L){let j=0;while(j<pm.length&&pm[j]<=L&&j<16)j++; walk = j>=16? t("walkOkAll") : t("walkOkUntil",{t:hh(T[j])});}
+  else {let j=pm.findIndex((v,i)=>i<16&&v<=L); walk = j>0? t("walkFrom",{t:hh(T[j])}) : t("walkNo");}
+  // airing: best 2h daytime window among next 24h (hours 09–19)
+  let best=null;
+  for(let i=0;i<pm.length-1;i++){const H=+T[i].slice(11,13); if(H<9||H>18)continue; const v=(pm[i]+pm[i+1])/2; if(!best||v<best.v) best={i,v}}
+  let airing = best && best.v<=L*1.15 ? t("airBest",{a:hh(T[best.i]),b:hh(T[best.i+2]||T[best.i+1])}) : t("airNone");
+  // sport
+  let mi=0; for(let i=0;i<Math.min(16,pm.length);i++) if(pm[i]<pm[mi]) mi=i;
+  const sport = pm[mi]<=12? t("sportOk",{t:hh(T[mi])}) : pm[mi]<=L? t("sportShort",{t:hh(T[mi])}) : t("sportNo");
+  return {walk,airing,sport,bestAir:best?best.i:-1,bestSport:mi};
+}
+
+/* ================================================================
+   SKY HERO — the mountains vanish behind haze as PM2.5 grows
+   ================================================================ */
+function skySVG(pm,id){
+  const haze=Math.min(.93,Math.max(0,(pm-6)/95));
+  const c=cat(pm);
+  const top=["#4f8fc6","#6f97b8","#8f98a0","#9a8f80","#8a7a68","#6e5e50"][c];
+  const bot=["#bfdcf0","#c9d6de","#d3ccbf","#cbb592","#b39a78","#8f7860"][c];
+  const hz=c<2?"rgba(214,222,228,":"rgba(201,163,106,";
+  return `
+  <svg class="ridge" viewBox="0 -120 400 340" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
+    <defs><linearGradient id="sk${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${top}"/><stop offset="1" stop-color="${bot}"/></linearGradient>
+    <linearGradient id="sn${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#dfe8ef"/></linearGradient></defs>
+    <rect y="-400" width="400" height="620" fill="url(#sk${id})"/>
+    <!-- far ridge: Talgar massif -->
+    <path d="M0 150 L40 120 L70 132 L110 84 L132 98 L160 60 L185 82 L205 70 L236 104 L262 88 L300 112 L330 92 L360 118 L400 104 L400 220 L0 220Z" fill="#7c90a6"/>
+    <path d="M110 84 L121 92 L132 98 L142 88 L160 60 L172 74 L185 82 L193 76 L205 70 L218 86 L196 86 L180 92 L160 78 L146 96 L128 104Z" fill="url(#sn${id})"/>
+    <!-- near ridge -->
+    <path d="M0 176 L55 140 L92 156 L140 124 L176 146 L214 118 L250 142 L290 128 L330 150 L370 136 L400 148 L400 220 L0 220Z" fill="#4f6378"/>
+    <path d="M140 124 L152 132 L162 136 L176 146 L164 142 L150 136Z M214 118 L226 128 L236 132 L222 130Z" fill="#e6edf2" opacity=".9"/>
+    <!-- city -->
+    <path d="M0 200 h20 v-10 h8 v-14 h10 v14 h12 v-6 h14 v-18 h6 v18 h16 v-8 h12 v8 h20 v-22 h8 v22 h18 v-10 h14 v10 h22 v-16 h10 v16 h16 v-6 h20 v-12 h8 v12 h14 v-4 h18 v-14 h12 v14 h22 v-8 h14 v8 h16 v-12 h10 v12 h16 V220 H0Z" fill="#2b3b4c"/>
+  </svg>
+  <div class="haze" style="opacity:${haze};background:linear-gradient(180deg,${hz}0.55) 0%,${hz}0.95) 62%,${hz}0.4) 100%)"></div>`;
+}
+function mountainNote(pm){const a=aqi(pm);return a<=60?t("mtVisible"):a<=130?t("mtHazy"):t("mtHidden")}
+
+/* ================================================================
+   RENDER: ONBOARDING
+   ================================================================ */
+const RISK=[["child","pChild","pChildS",'<circle cx="12" cy="6" r="3"/><path d="M8 21v-6l-2-3 3-2h6l3 2-2 3v6"/>'],
+  ["asthma","pAsthma","pAsthmaS",'<path d="M12 3v8"/><path d="M12 11c-3 0-7 2-7 7 0 2 1 3 3 3s4-2 4-5"/><path d="M12 11c3 0 7 2 7 7 0 2-1 3-3 3s-4-2-4-5"/>'],
+  ["heart","pHeart","pHeartS",'<path d="M19 14c1.5-1.5 3-3.3 3-5.5A5.5 5.5 0 0 0 12 5a5.5 5.5 0 0 0-10 3.5c0 2.3 1.5 4 3 5.5l7 7Z"/><path d="M3.2 12H8l1.5-3 3 6 1.5-3h6.5"/>'],
+  ["older","pOlder","pOlderS",'<circle cx="11" cy="5" r="2.5"/><path d="M10 9 8 15l3 1 1 5M14 11l2 2v8"/>'],
+  ["sport","pSport","pSportS",'<circle cx="15" cy="4.5" r="2.5"/><path d="m5 21 3-6 4 2 1-6-4-2-3 3M13 11l3 3h4"/>'],
+  ["none","pNone","pNoneS",'<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>']];
+function chipsHTML(){
+  return `<div class="chips" role="group" aria-label="${t("obStep2")}">${RISK.map(([k,a,b,p])=>
+    `<button class="chip" data-risk="${k}" aria-pressed="${!!S.risk[k]}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg><b>${t(a)}</b><small>${t(b)}</small></button>`).join("")}</div>`;
+}
+function langsHTML(){return `<div class="langs" role="group" aria-label="${t("obLang")}">${[["kk","Қазақша"],["ru","Русский"],["en","English"]].map(([k,n])=>`<button data-lang="${k}" aria-pressed="${S.lang===k}" lang="${k}">${n}</button>`).join("")}</div>`}
+function districtSelect(id="distSel"){return `<select class="in" id="${id}" aria-label="${t("district")}" style="width:100%">${DISTRICTS.map(d=>`<option value="${d.id}" ${d.id===S.district?"selected":""}>${d.name[S.lang]}</option>`).join("")}</select>`}
+function alertsCore(){
+  const A=S.alerts;
+  return `
+  <div class="card">
+   <div class="set"><div class="l"><b id="lOn">${t("aOn")}</b><small>${t("aOnS")}</small></div><button class="switch" role="switch" aria-labelledby="lOn" aria-checked="${A.on}" data-sw="on"></button></div>
+   <div class="set" style="display:block"><div class="l" style="margin-bottom:10px"><b>${t("aLevel")}</b></div>
+     <div class="radio" role="radiogroup">
+       <button role="radio" aria-checked="${A.level===1}" data-level="1"><span><b>${t("aLvl1")}</b><small>${t("aLvl1S")}</small></span></button>
+       <button role="radio" aria-checked="${A.level===2}" data-level="2"><span><b>${t("aLvl2")}</b><small>${t("aLvl2S")}</small></span></button>
+     </div></div>
+   <div class="set"><div class="l"><b id="lQ">${t("quiet")}</b><small>${t("quietS")}</small></div></div>
+   <div class="row" style="padding-bottom:6px"><label style="flex:1;font-size:.82rem;color:var(--ink-2);font-weight:600">${t("fromT")}<br><input type="time" id="qFrom" value="${A.qFrom}" aria-label="${t("quiet")} ${t("fromT")}" style="width:100%"></label>
+     <label style="flex:1;font-size:.82rem;color:var(--ink-2);font-weight:600">${t("toT")}<br><input type="time" id="qTo" value="${A.qTo}" aria-label="${t("quiet")} ${t("toT")}" style="width:100%"></label></div>
+  </div>`;
+}
+function renderOB(){
+  const v=$("#v-ob"); const steps=`<div class="steps" aria-label="Step ${obStep+1} of 4">${[0,1,2,3].map(i=>`<i class="${i<=obStep?"on":""}"></i>`).join("")}</div>`;
+  let body="",foot="";
+  if(obStep===0){
+    body=`<div class="ob-hero sky" style="height:210px">${skySVG(air?air.pm[0]:20,"ob")}</div>
+      <h1>${t("obStep1")}</h1><p class="lead">${t("obLead1")}</p>
+      <p style="font-weight:700;margin:0 0 8px">${t("obLang")}</p>${langsHTML()}`;
+    foot=`<button class="btn" data-ob="next">${t("obNext")}</button>`;
+  } else if(obStep===1){
+    body=`<h1>${t("obStep2")}</h1><p class="lead">${t("obLead2")}</p>${chipsHTML()}`;
+    foot=`<button class="btn" data-ob="next">${t("obNext")}</button><button class="btn ghost" data-ob="back">${t("obBack")}</button>`;
+  } else if(obStep===2){
+    body=`<h1>${t("obStep3")}</h1><p class="lead">${t("obLead3")}</p>
+      <div class="radio" role="radiogroup" aria-label="${t("obStep3")}">
+        <button role="radio" aria-checked="${S.loc==="gps"}" data-loc="gps"><span><b>${t("useGps")}</b><small>${t("useGpsS")}</small></span></button>
+        <button role="radio" aria-checked="${S.loc==="district"}" data-loc="district"><span><b>${t("chooseDistrict")}</b></span></button>
+      </div>
+      <div id="obDist" style="margin-top:12px" ${S.loc==="district"?"":"hidden"}>${districtSelect("obDistSel")}</div>`;
+    foot=`<button class="btn" data-ob="next">${t("obNext")}</button><button class="btn ghost" data-ob="back">${t("obBack")}</button>`;
+  } else {
+    body=`<h1>${t("obStep4")}</h1><p class="lead">${t("obLead4")}</p>${alertsCore()}`;
+    foot=`<button class="btn" data-ob="finish">${t("obDone")}</button><button class="btn ghost" data-ob="back">${t("obBack")}</button>`;
+  }
+  v.innerHTML=`<div class="ob">${steps}${body}<div class="foot">${foot}</div></div>`;
+  v.scrollTop=0;
+}
+
+/* ================================================================
+   RENDER: TODAY
+   ================================================================ */
+function locLabel(){const d=DISTRICTS.find(x=>x.id===S.district); return S.loc==="gps"&&scenario!=="nogps"? `${d.name[S.lang]} · ${t("nearYou")}` : d.name[S.lang]}
+function renderToday(){
+  const v=$("#v-today");
+  if(!air){v.innerHTML=`<div class="sky" style="height:330px;background:#c9d6de"></div><div class="pad stack" aria-busy="true"><span class="sr">${t("loading")}</span>${[1,2,3].map(()=>`<div class="skel" style="height:76px"></div>`).join("")}</div>`;return}
+  const pm=air.pm[0], a=aqi(pm), c=cat(pm), ad=advice();
+  const noGps = scenario==="nogps" && S.loc==="gps";
+  const L=limitPM(), maxPM=Math.max(...air.pm, L*1.2);
+  const banners=[];
+  if(air.offline) banners.push(`<div class="banner warn" role="alert"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M2 8.8a15 15 0 0 1 20 0M5 12.9a10 10 0 0 1 14 0M8.5 16.4a5 5 0 0 1 7 0M2 2l20 20"/></svg><div>${t("offline",{t:air.at?new Date(air.at).toLocaleTimeString(S.lang==="en"?"en-GB":"ru-RU",{hour:"2-digit",minute:"2-digit"}):hh(air.genTime)})}<span class="act"><button data-act="retry">${t("offlineAct")}</button></span></div></div>`);
+  if(noGps) banners.push(`<div class="banner err" role="alert"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="10" r="3"/><path d="M12 21s-7-6-7-11a7 7 0 0 1 14 0c0 5-7 11-7 11z"/><path d="M3 3l18 18"/></svg><div>${t("noGps")}<span class="act"><button data-act="pickDistrict">${t("noGpsAct")}</button></span></div></div>`);
+  const qW = S.risk.child? t("qWalkChild") : t("qWalk");
+  v.innerHTML=`
+  <div class="today-grid">
+   <section class="sky" aria-label="Air now">
+     ${skySVG(pm,"t")}
+     <div class="content">
+       <button class="loc" data-act="pickDistrict" aria-label="${t("district")}: ${esc(locLabel())}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><circle cx="12" cy="10" r="3"/><path d="M12 21s-7-6-7-11a7 7 0 0 1 14 0c0 5-7 11-7 11z"/></svg>${esc(locLabel())}</button>
+       <button class="aqi-row aqi-btn" data-act="meaning" aria-label="AQI ${a}, ${t("cat"+c)}. ${t("whatMeans")}"><span class="aqi-num">${a}</span><span class="aqi-meta"><b>${t("cat"+c)}</b>${t("whoX",{x:(pm/15).toFixed(1)})}<span class="why-link">${t("whatMeans")}</span></span></button>
+       <p class="headline">${t("h"+c)}</p>
+       <p class="fresh">${air.offline?t("cachedAt",{t:hh(air.genTime)}):t("freshAt",{t:hh(air.genTime)})}</p>
+     </div>
+     <div class="mountain-note" aria-hidden="true">${mountainNote(pm)}</div>
+   </section>
+   <div class="pad stack">
+     ${banners.join("")}
+     <button class="card answer" data-act="walkDetail" id="walkCard">
+       <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="13" cy="4" r="2"/><path d="m7 21 3-7 3 2v5M10 14l1-5 4 3 3 1M8 9l3-1"/></svg></span>
+       <span><span class="q">${qW}</span><span class="a" style="display:block">${ad.walk}</span></span><span class="chev" aria-hidden="true">›</span></button>
+     <div class="card answer" style="cursor:default">
+       <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M12 3v18M4 12h16"/></svg></span>
+       <span><span class="q">${t("qAir")}</span><span class="a" style="display:block">${ad.airing}</span></span><span></span></div>
+     ${S.risk.sport?`<div class="card answer" style="cursor:default"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="15" cy="4.5" r="2.5"/><path d="m5 21 3-6 4 2 1-6-4-2-3 3M13 11l3 3h4"/></svg></span><span><span class="q">${t("qSport")}</span><span class="a" style="display:block">${ad.sport}</span></span><span></span></div>`:""}
+     <div class="card">
+       <div class="sec-title" style="margin:0 0 10px"><span style="font-size:1rem;color:var(--ink);font-weight:800">${t("next24")}</span><span>${t("pm")}</span></div>
+       <div class="strip" role="list" aria-label="${t("next24")}">
+        ${air.pm.slice(0,24).map((p,i)=>{const cc=cat(p),hgt=Math.max(8,Math.round(p/maxPM*86));const bestI=i===ad.bestAir;
+          return `<div class="hour ${i===0?"now":""} ${bestI?"best":""}" role="listitem" aria-label="${hh(air.times[i])}: PM2.5 ${p.toFixed(0)}, ${t("cat"+cc)}${bestI?", "+t("bestMark"):""}">
+           <div class="bars"><span class="v">${p.toFixed(0)}</span><div class="bar ${cc>=2?"pat":""}" style="height:${hgt}px;background:${CATCOL[cc]}"></div></div><span class="t">${i===0?(S.lang==="en"?"Now":S.lang==="ru"?"Сейч":"Қазір"):hh(air.times[i]).slice(0,2)}</span></div>`}).join("")}
+       </div>
+       <div class="legend" aria-hidden="true">${[...new Set(air.pm.slice(0,24).map(cat))].sort().map(i=>`<span><i style="background:${CATCOL[i]}"></i>${t("cat"+i)}</span>`).join("")}<span><i style="background:var(--glacier);border-radius:50%"></i>${t("bestMark")}</span></div>
+     </div>
+     <p class="meta">${t("updated")} ${hh(air.genTime)} · ${t("source")}. ${t("notSensor")} <button data-act="retry">${t("refresh")}</button></p>
+     <p class="disclaimer">${t("disclaimer")}</p>
+   </div>
+  </div>`;
+}
+
+/* ================================================================
+   RENDER: ROUTE
+   ================================================================ */
+function hav(a,b){const R=6371000,r=Math.PI/180,dLa=(b[0]-a[0])*r,dLo=(b[1]-a[1])*r;const x=Math.sin(dLa/2)**2+Math.cos(a[0]*r)*Math.cos(b[0]*r)*Math.sin(dLo/2)**2;return 2*R*Math.asin(Math.sqrt(x))}
+function routeStats(){
+  const v = travelMode==="walk"? 78 : 230; // m per minute
+  const base = air? air.pm[0] : 25;
+  const out = ROUTES.map(r=>{let m=0,exp=0;for(let i=1;i<r.pts.length;i++){const d=hav(r.pts[i-1],r.pts[i]);m+=d;exp+=d/v*base*(r.pts[i][2]||1)}return {...r,len:m,min:Math.round(m/v),exp}});
+  const fast = out.reduce((a,b)=>a.min<b.min||(a.min===b.min&&a.exp>b.exp)?a:b);
+  const clean = out.reduce((a,b)=>a.exp<b.exp?a:b);
+  out.forEach(r=>{r.label = r===clean?"cleanest": r===fast?"fastest":"balanced"; r.delta=Math.round((1-r.exp/fast.exp)*100)});
+  const order={cleanest:0,balanced:1,fastest:2};
+  return out.sort((a,b)=>order[a.label]-order[b.label]);
+}
+const RCOL={cleanest:"#0d6e78",balanced:"#7a8794",fastest:"#b3261e"};
+function renderRoute(){
+  const v=$("#v-route"); const rs=routeStats();
+  if(!rs.find(r=>r.id===selRoute)) selRoute=rs[0].id;
+  v.innerHTML=`
+   <header class="topbar"><h1>${t("rTitle")}</h1><p>${t("rLead")}</p></header>
+   <div class="route-wide">
+    <div class="map" id="map" role="img" aria-label="Map with three walking routes from home to the kindergarten"></div>
+    <div class="pad stack">
+     <div class="card route-form">
+       <label for="rFrom">${t("from")}</label><select class="in" id="rFrom"><option>${PLACES.home[S.lang]}</option></select>
+       <label for="rTo">${t("to")}</label><select class="in" id="rTo"><option>${PLACES.kg[S.lang]}</option></select>
+       <div class="seg" role="group" aria-label="Mode" style="margin-top:6px">
+         <button data-mode="walk" aria-pressed="${travelMode==="walk"}">${t("walk")}</button><button data-mode="bike" aria-pressed="${travelMode==="bike"}">${t("bike")}</button></div>
+     </div>
+     ${air&&air.offline?`<div class="banner warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><div>${t("offline",{t:hh(air.genTime)})}</div></div>`:""}
+     <div class="radio" role="radiogroup" aria-label="${t("rTitle")}" style="gap:10px">
+      ${rs.map(r=>`<button class="rcard" role="radio" aria-checked="${r.id===selRoute}" data-route="${r.id}">
+         <span class="stripe" style="background:${RCOL[r.label]}"></span>
+         <span><b>${t(r.name)}</b>${r.label==="cleanest"?`<span class="tag">${t("tagRec")}</span>`:r.label==="fastest"?`<span class="tag" style="background:#fdecea;color:#8c1d13">${t("tagFast")}</span>`:""}<span class="why" style="display:block">${t(r.why)} · ${(r.len/1000).toFixed(1)} km</span></span>
+         <span class="num"><strong>${r.min} ${t("min")}</strong><span>${r.label==="fastest"?t("same"):`<span class="delta ${r.delta<0?"bad":""}">${r.delta>0?"−":"+"}${Math.abs(r.delta)}%</span> ${t("smog")}`}</span></span>
+       </button>`).join("")}
+     </div>
+     <button class="btn" data-act="startRoute">${t("startRoute")}</button>
+     <p class="meta">${t("rData")}</p>
+    </div>
+   </div>`;
+  v.querySelectorAll(".rcard").forEach(b=>b.style.display="grid");
+  drawMap(rs);
+}
+function drawMap(rs){
+  const el=$("#map"); if(!window.L){el.innerHTML=`<div class="banner warn" style="margin:16px">Map needs internet. Routes below still work.</div>`;return}
+  if(map){map.remove();map=null}
+  map=L.map(el,{zoomControl:false,attributionControl:true,scrollWheelZoom:false}).setView([43.2400,76.915],15);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{attribution:'© OpenStreetMap contributors',maxZoom:19,className:"calm-tiles"}).addTo(map);
+  const ordered=[...rs].sort((a,b)=>(a.id===selRoute)-(b.id===selRoute));
+  const bounds=[];
+  ordered.forEach(r=>{const ll=r.pts.map(p=>[p[0],p[1]]);bounds.push(...ll);const on=r.id===selRoute;
+    L.polyline(ll,{color:"#fff",weight:on?11:8,opacity:.95}).addTo(map);
+    const pl=L.polyline(ll,{color:RCOL[r.label],weight:on?7:4.5,opacity:on?1:.55,dashArray:r.label==="fastest"&&!on?"2 8":null,lineCap:"round"}).addTo(map);
+    pl.on("click",()=>{selRoute=r.id;track("route_select",{id:r.id,label:r.label});renderRoute()});
+  });
+  const pin=(ll,txt,col)=>L.marker(ll,{icon:L.divIcon({className:"",iconSize:[0,0],html:`<div style="background:${col};color:#fff;font-weight:800;font-size:12px;padding:5px 9px;border-radius:99px;box-shadow:0 2px 8px rgba(0,0,0,.3);white-space:nowrap;transform:translate(-50%,-130%)">${txt}</div>`})}).addTo(map);
+  pin(PLACES.home.ll,S.lang==="en"?"Home":S.lang==="ru"?"Дом":"Үй","#1f2d3d");
+  pin(PLACES.kg.ll,S.lang==="en"?"Kindergarten":S.lang==="ru"?"Детсад":"Балабақша","#1f2d3d");
+  const fit=()=>{if(!map)return;map.invalidateSize();map.fitBounds(bounds,{paddingTopLeft:[30,50],paddingBottomRight:[30,24]})};
+  fit(); setTimeout(fit,80); setTimeout(fit,400);
+}
+
+/* ================================================================
+   RENDER: ALERTS + PROFILE
+   ================================================================ */
+function renderAlerts(){
+  const v=$("#v-alerts"), A=S.alerts;
+  v.innerHTML=`<header class="topbar"><h1>${t("aTitle")}</h1><p>${t("aLead")}</p></header>
+   <div class="pad stack narrow">${alertsCore()}
+    <div class="card"><div class="l" style="margin-bottom:4px"><b>${t("aTypes")}</b></div>
+     ${[["worse","aWorse"],["window","aWindow"],["morning","aMorning"]].map(([k,l])=>`<div class="set"><div class="l"><b id="l_${k}" style="font-weight:600">${t(l)}</b></div><button class="switch" role="switch" aria-labelledby="l_${k}" aria-checked="${A[k]}" data-sw="${k}" ${A.on?"":"disabled"}></button></div>`).join("")}
+    </div>
+    <p class="meta" id="autosaveNote">${t("autosave")}</p><button class="btn sec" data-act="preview">${t("preview")}</button>
+   </div>`;
+}
+function renderMe(){
+  const v=$("#v-me");
+  v.innerHTML=`<header class="topbar"><h1>${t("meTitle")}</h1></header>
+   <div class="pad stack narrow">
+    <div class="sec-title">${t("meRisk")}</div>${chipsHTML()}
+    <div class="card">
+      <div class="set" style="display:block"><div class="l" style="margin-bottom:8px"><b>${t("meLang")}</b></div>${langsHTML()}</div>
+      <div class="set"><div class="l"><b id="lBig">${t("meText")}</b><small>${t("meTextS")}</small></div><button class="switch" role="switch" aria-labelledby="lBig" aria-checked="${S.bigText}" data-act="bigText"></button></div>
+      <div class="set" style="display:block"><div class="l" style="margin-bottom:8px"><b>${t("meLoc")}</b></div>${districtSelect("meDist")}</div>
+    </div>
+    <div class="card"><b>${t("mePriv")}</b><p class="meta" style="margin:6px 0 12px;font-size:.86rem;color:var(--ink-2)">${t("mePrivS")}</p>
+      <button class="btn danger" data-act="askDelete">${t("meDel")}</button></div>
+    <p class="disclaimer">${t("disclaimer")}</p>
+   </div>`;
+}
+
+/* ================================================================
+   OVERLAYS
+   ================================================================ */
+let toastTimer, undoFn;
+function toast(msg,undo){
+  $("#toastText").textContent=msg; const u=$("#toastUndo");
+  undoFn=undo||null; u.hidden=!undo; u.textContent=t("undo");
+  $("#toast").classList.add("on"); clearTimeout(toastTimer); toastTimer=setTimeout(()=>$("#toast").classList.remove("on"),undo?6000:3200);
+}
+$("#toastUndo").onclick=()=>{if(undoFn)undoFn();$("#toast").classList.remove("on")};
+function openSheet(html,onOpen){$("#sheetBody").innerHTML=html;$("#sheet").classList.add("on");$("#scrim").classList.add("on");setTimeout(()=>{const f=$("#sheet button");f&&f.focus()},50);onOpen&&onOpen()}
+function closeSheet(){$("#sheet").classList.remove("on");$("#scrim").classList.remove("on");$("#dialog").classList.remove("on")}
+$("#scrim").onclick=closeSheet;
+document.addEventListener("keydown",e=>{if(e.key==="Escape")closeSheet()});
+function walkDetail(){
+  const L=limitPM(); const wins=[]; let st=-1;
+  air.pm.forEach((p,i)=>{if(p<=L&&st<0)st=i; if((p>L||i===air.pm.length-1)&&st>=0){const end=p>L?i:i; if(end-st>=1)wins.push([st,end]); st=-1}});
+  track("walk_detail");
+  openSheet(`<h2 id="sheetTitle">${t("detailTitle")}</h2><p class="meta" style="font-size:.88rem;color:var(--ink-2)">${t("detailLead",{lvl:sensitive()?t("lvlSens"):t("lvlGen")})}</p>
+   <div class="sec-title">${t("windowList")}</div>
+   <div class="stack" style="margin:10px 0 16px">${wins.length?wins.slice(0,4).map(([a,b])=>`<div class="card row" style="box-shadow:none;border:1.5px solid var(--line)"><span class="badge" style="background:var(--q0)">✓</span><b>${hh(air.times[a])} – ${hh(air.times[b])}</b><span class="meta" style="margin-left:auto">PM2.5 ≤ ${L.toFixed(0)}</span></div>`).join(""):`<div class="banner info">${t("noWindow")}</div>`}</div>
+   <button class="btn" data-act="close">${t("close")}</button>`);
+}
+function districtSheet(){
+  track("district_sheet");
+  openSheet(`<h2 id="sheetTitle">${t("district")}</h2><div class="radio" role="radiogroup" style="margin:12px 0 16px">${DISTRICTS.map(d=>`<button role="radio" aria-checked="${S.district===d.id&&(S.loc==="district"||scenario!=="nogps")}" data-pick="${d.id}"><span><b>${d.name[S.lang]}</b></span></button>`).join("")}</div><button class="btn sec" data-act="close">${t("close")}</button>`);
+}
+function previewPush(){
+  const L=limitPM(); let j=air.pm.findIndex((p,i)=>i>0&&p>L); if(j<0) j=air.pm.indexOf(Math.max(...air.pm));
+  const p=$("#push"); p.innerHTML=`<div class="appi"><svg width="22" height="22" viewBox="0 0 64 64" aria-hidden="true"><path d="M6 46 22 24l8 10 8-14 20 26z" fill="#eef3f7"/><rect x="6" y="38" width="52" height="10" fill="#c9a36a" opacity=".8"/></svg></div>
+   <div><span class="when">${S.lang==="en"?"now":S.lang==="ru"?"сейчас":"қазір"}</span><b>${t("pushWorse")}</b><p>${t("pushWorseB",{v:air.pm[j].toFixed(0),t:hh(air.times[j])})}</p></div>`;
+  p.classList.add("on"); setTimeout(()=>p.classList.remove("on"),4200); track("alert_preview");
+}
+function askDelete(){
+  const d=$("#dialog"); d.innerHTML=`<h2 id="dlgTitle">${t("delQ")}</h2><p>${t("delP")}</p><div class="row"><button class="btn sec" data-act="close">${t("cancel")}</button><button class="btn danger" data-act="doDelete">${t("del")}</button></div>`;
+  d.classList.add("on");$("#scrim").classList.add("on");setTimeout(()=>d.querySelector("button").focus(),40);
+}
+
+/* ================================================================
+   NAV + EVENTS
+   ================================================================ */
+function show(tab){
+  currentTab=tab;
+  ["today","route","alerts","me"].forEach(x=>{$("#v-"+x).hidden=x!==tab});
+  $("#v-ob").hidden=true;
+  document.querySelectorAll(".tabbar button").forEach(b=>b.toggleAttribute("aria-current",b.dataset.tab===tab)||b.dataset.tab===tab&&b.setAttribute("aria-current","page"));
+  document.querySelectorAll(".tabbar button").forEach(b=>{if(b.dataset.tab===tab)b.setAttribute("aria-current","page");else b.removeAttribute("aria-current")});
+  ({today:renderToday,route:renderRoute,alerts:renderAlerts,me:renderMe})[tab]();
+  $("#v-"+tab).scrollTop=0; track("tab",{tab});
+}
+function renderAll(){
+  document.documentElement.lang=S.lang==="kk"?"kk":S.lang;
+  document.querySelectorAll("[data-i]").forEach(e=>e.textContent=t(e.dataset.i));
+  document.documentElement.style.fontSize=S.bigText?"115%":"";
+  if(!S.onboarded){$("#app").classList.add("onboarding");["today","route","alerts","me"].forEach(x=>$("#v-"+x).hidden=true);$("#v-ob").hidden=false;renderOB()}
+  else{$("#app").classList.remove("onboarding");$("#v-ob").innerHTML="";show(currentTab)}
+}
+document.querySelectorAll(".tabbar button").forEach(b=>b.onclick=()=>show(b.dataset.tab));
+
+let alertsSnapshot=null;
+$("#app").addEventListener("click",e=>{
+  const b=e.target.closest("button"); if(!b) return;
+  tapCount();
+  if(b.dataset.lang){S.lang=b.dataset.lang;save();track("lang",{lang:S.lang});renderAll();return}
+  if(b.dataset.risk){const k=b.dataset.risk;
+    if(k==="none"){Object.keys(S.risk).forEach(x=>S.risk[x]=false);S.risk.none=true}
+    else{S.risk[k]=!S.risk[k];S.risk.none=false}
+    save();track("risk",{...S.risk});
+    document.querySelectorAll("[data-risk]").forEach(c=>c.setAttribute("aria-pressed",!!S.risk[c.dataset.risk]));return}
+  if(b.dataset.loc){S.loc=b.dataset.loc;save();document.querySelectorAll("[data-loc]").forEach(x=>x.setAttribute("aria-checked",x.dataset.loc===S.loc));$("#obDist").hidden=S.loc!=="district";return}
+  if(b.dataset.ob){const a=b.dataset.ob;
+    if(a==="next"){obStep++;renderOB()} else if(a==="back"){obStep=Math.max(0,obStep-1);renderOB()}
+    else if(a==="finish"){readAlertInputs();S.onboarded=true;save();track("onboarded",{risk:{...S.risk}});currentTab="today";renderAll()}
+    return}
+  if(b.dataset.sw){ if(b.disabled) return; const prev=JSON.stringify(S.alerts); const k=b.dataset.sw; S.alerts[k]=!S.alerts[k]; b.setAttribute("aria-checked",S.alerts[k]); if(k==="on"&&currentTab==="alerts"&&S.onboarded){readAlertInputs();renderAlerts()} autosaveAlerts(prev); return}
+  if(b.dataset.level){const prev=JSON.stringify(S.alerts); S.alerts.level=+b.dataset.level;document.querySelectorAll("[data-level]").forEach(x=>x.setAttribute("aria-checked",+x.dataset.level===S.alerts.level)); autosaveAlerts(prev); return}
+  if(b.dataset.mode){travelMode=b.dataset.mode;renderRoute();return}
+  if(b.dataset.route){selRoute=b.dataset.route;const r=routeStats().find(x=>x.id===selRoute);track("route_select",{id:selRoute,label:r.label});renderRoute();return}
+  if(b.dataset.pick){S.district=b.dataset.pick;S.loc="district";save();track("district_set",{d:S.district});closeSheet();if(scenario==="nogps"){}renderAll();toast(`${t("district")}: ${DISTRICTS.find(d=>d.id===S.district).name[S.lang]}`);return}
+  const act=b.dataset.act;
+  if(act==="walkDetail") walkDetail();
+  else if(act==="close") closeSheet();
+  else if(act==="pickDistrict") districtSheet();
+  else if(act==="retry") loadAir(true);
+  else if(act==="startRoute"){const r=routeStats().find(x=>x.id===selRoute);track("route_start",{id:r.id,label:r.label,delta:r.delta});
+    toast(r.label==="fastest"?t("startedFast",{m:r.min}):t("started",{m:r.min,p:Math.max(0,r.delta)}),()=>{track("route_undo");toast(t("undone"))})}
+  else if(act==="preview") previewPush();
+  else if(act==="meaning") meaningSheet();
+  else if(act==="saveAlerts"){const prev=JSON.parse(JSON.stringify(alertsSnapshot||S.alerts));readAlertInputs();save();track("alerts_saved",{...S.alerts});alertsSnapshot=JSON.parse(JSON.stringify(S.alerts));
+    toast(t("saved"),()=>{S.alerts=prev;save();alertsSnapshot=prev;renderAlerts();track("alerts_undo")})}
+  else if(act==="bigText"){S.bigText=!S.bigText;save();renderAll()}
+  else if(act==="askDelete"){track("delete_ask");askDelete()}
+  else if(act==="doDelete"){const keepLang=S.lang;localStorage.removeItem("sn_state");S=structuredClone(DEF);S.lang=keepLang;obStep=0;save();closeSheet();track("deleted");renderAll();toast(t("deleted"))}
+});
+$("#app").addEventListener("change",e=>{
+  if(e.target.id==="qFrom"||e.target.id==="qTo"){
+    const f=$("#qFrom").value,to=$("#qTo").value; let er=$("#qErr");
+    if(f===to){ if(!er){er=document.createElement("p");er.id="qErr";er.className="qerr";er.setAttribute("role","alert");e.target.closest(".row").after(er)} er.textContent=t("qSame"); return }
+    if(er) er.remove();
+    const prev=JSON.stringify(S.alerts); readAlertInputs(); autosaveAlerts(prev); return }
+  if(e.target.id==="obDistSel"||e.target.id==="meDist"){S.district=e.target.value;S.loc=e.target.id==="meDist"?"district":S.loc;save();track("district_set",{d:S.district});if(air)loadAir(false)}
+});
+let saveTimer=null, savePrev=null;
+function autosaveAlerts(prev){
+  if(!S.onboarded) return;               // onboarding saves on "Start"
+  if(savePrev===null) savePrev=prev;
+  clearTimeout(saveTimer);
+  saveTimer=setTimeout(()=>{const before=JSON.parse(savePrev); savePrev=null; save(); track("alerts_saved",{...S.alerts});
+    toast(t("saved"),()=>{S.alerts=before;save();renderAlerts();track("alerts_undo");toast(t("undone2"))})},500);
+}
+function meaningSheet(){
+  const pm=air.pm[0], c=cat(pm); track("meaning");
+  openSheet(`<h2 id="sheetTitle">${t("mTitle")}</h2><p class="meta" style="font-size:.88rem;color:var(--ink-2);margin:0 0 10px">${t("mLead")}</p>
+   ${[0,1,2,3,4,5].map(i=>`<div class="scale-row ${i===c?"on":""}"><i style="background:${CATCOL[i]}"></i><b>${["0–50","51–100","101–150","151–200","201–300","301+"][i]}</b><span><b>${t("cat"+i)}</b>${i===c?` · <span style="color:var(--glacier);font-weight:800">${t("mYou")}</span>`:""}<br>${t("m"+i)}</span></div>`).join("")}
+   <p class="meta" style="margin:12px 0 14px">${t("mWho")}</p><button class="btn" data-act="close">${t("close")}</button>`);
+}
+function readAlertInputs(){const f=$("#qFrom"),to=$("#qTo");if(f)S.alerts.qFrom=f.value;if(to)S.alerts.qTo=to.value}
+
+async function loadAir(user){
+  try{const res=await fetchAir();air=buildAir(res);if(user)toast(air.offline?t("offline",{t:hh(air.genTime)}):`${t("updated")} ${hh(air.genTime)}`)}
+  catch(e){air=null}
+  if(S.onboarded){ if(currentTab==="today")renderToday(); if(currentTab==="route")renderRoute() } else renderOB();
+}
+
+/* presenter controls */
+$("#dvPhone").onclick=()=>{$("#device").classList.remove("tablet");$("#dvPhone").setAttribute("aria-pressed",true);$("#dvTab").setAttribute("aria-pressed",false);setTimeout(()=>map&&map.invalidateSize(),500)};
+$("#dvTab").onclick=()=>{$("#device").classList.add("tablet");$("#dvTab").setAttribute("aria-pressed",true);$("#dvPhone").setAttribute("aria-pressed",false);setTimeout(()=>{map&&map.invalidateSize();if(currentTab==="route")renderRoute()},500)};
+$("#scenario").onchange=e=>{scenario=e.target.value;if(scenario==="nogps"&&S.loc!=="gps"){S.loc="gps";save()}loadAir(false)};
+$("#resetAll").onclick=()=>{localStorage.removeItem("sn_state");S=structuredClone(DEF);obStep=0;currentTab="today";renderAll()};
+
+/* ================================================================
+   USABILITY TEST KIT  (?test)
+   Records time on task, taps and completion automatically from
+   app events, then a 10-item SUS. Results stay in localStorage and
+   export as CSV for card 7.
+   ================================================================ */
+const TEST = new URLSearchParams(location.search).has("test");
+const TASKS=[
+ {id:"T1",en:"Set up the app for your 5-year-old child and finish onboarding.",ru:"Настройте приложение для своего ребёнка 5 лет и завершите настройку.",
+   prep:()=>{localStorage.removeItem("sn_state");S=structuredClone(DEF);S.risk.child=false;obStep=0;currentTab="today";renderAll()},
+   done:(e,d)=>e==="onboarded"&&d.risk&&d.risk.child},
+ {id:"T2",en:"Find out until what time it is OK to walk with the child today.",ru:"Узнайте, до скольки сегодня можно гулять с ребёнком.",
+   prep:()=>{show("today")},done:(e)=>e==="walk_detail"},
+ {id:"T3",en:"Choose the way to the kindergarten with the least smog and start it.",ru:"Выберите путь в детсад с наименьшим смогом и начните его.",
+   prep:()=>{selRoute="sat";show("today")},done:(e,d)=>e==="route_start"&&d.label==="cleanest"},
+ {id:"T4",en:"Make sure alerts never wake you between 23:00 and 07:00.",ru:"Сделайте так, чтобы оповещения не будили с 23:00 до 07:00.",
+   prep:()=>{show("today")},done:(e,d)=>e==="alerts_saved"&&d.qFrom==="23:00"&&d.qTo==="07:00"},
+ {id:"T5",en:"Your phone's location is off. Get advice for Almaly district anyway.",ru:"Геолокация выключена. Всё равно получите советы для Алмалинского района.",
+   prep:()=>{scenario="nogps";$("#scenario").value="nogps";S.loc="gps";save();show("today");loadAir(false)},done:(e,d)=>e==="district_set"&&d.d==="almaly"},
+];
+const SUSQ=["I think that I would like to use this app frequently.","I found the app unnecessarily complex.","I thought the app was easy to use.","I think that I would need the support of a technical person to be able to use this app.","I found the various functions in this app were well integrated.","I thought there was too much inconsistency in this app.","I would imagine that most people would learn to use this app very quickly.","I found the app very cumbersome to use.","I felt very confident using the app.","I needed to learn a lot of things before I could get going with this app."];
+let TS={phase:"intro",pid:"",group:"",ti:-1,start:0,taps:0,res:[],sus:Array(10).fill(0)};
+function tapCount(){if(TEST&&TS.phase==="task")TS.taps++}
+function track(ev,data={}){
+  if(!TEST||TS.phase!=="task") return;
+  const task=TASKS[TS.ti]; if(task&&task.done(ev,data)) finishTask(true);
+}
+function startTask(){const task=TASKS[TS.ti];task.prep();TS.start=performance.now();TS.taps=0;TS.phase="task";renderTest()}
+function finishTask(ok){
+  const task=TASKS[TS.ti];TS.res.push({task:task.id,success:ok?1:0,seconds:Math.round((performance.now()-TS.start)/100)/10,taps:TS.taps});
+  TS.phase="between"; if(scenario==="nogps"){scenario="live";$("#scenario").value="live";loadAir(false)}
+  if(ok) toast(`✓ ${task.id}`);
+  renderTest();
+}
+function susScore(a){let s=0;a.forEach((v,i)=>s+= i%2===0? v-1 : 5-v);return s*2.5}
+function allResults(){return JSON.parse(localStorage.getItem("sn_tests")||"[]")}
+function renderTest(){
+  if(!TEST) return;
+  const host = innerWidth>1180 ? $("#testDock") : mobileTestHost();
+  $("#testIntro").hidden=true; host.style.display="block";
+  let h="";
+  if(TS.phase==="intro"){
+    h=`<div class="tpanel"><h3>Usability test</h3><p class="meta">Moderator panel. The participant uses only the phone screen.</p>
+      <label class="meta">Participant ID<input id="tpid" value="P${allResults().length+1}"></label>
+      <label class="meta">Group (parent / asthma / runner / student)<input id="tgrp" placeholder="parent"></label>
+      <div class="btns"><button class="p" id="tGo">Start session</button><button id="tShow">Results (${allResults().length})</button></div></div>`;
+  } else if(TS.phase==="task"||TS.phase==="between"){
+    h=`<div class="tpanel"><h3>${esc(TS.pid)} · task ${TS.ti+1} of ${TASKS.length}</h3>
+      ${TASKS.map((k,i)=>{const r=TS.res.find(x=>x.task===k.id);return `<div class="task ${i===TS.ti&&TS.phase==="task"?"cur":""} ${r?"ok":""}"><b>${k.id}. ${k.en}</b><span class="meta">${k.ru}</span>${r?`<div class="stat"><span>${r.success?"✓ done":"✗ gave up"}</span><span>${r.seconds}s</span><span>${r.taps} taps</span></div>`:""}</div>`}).join("")}
+      <div class="btns">${TS.phase==="task"?`<button id="tFail">Participant gave up</button><button id="tOk">Mark done</button><span class="meta" id="tClock" style="align-self:center;margin-left:auto"></span>`:
+        TS.ti<TASKS.length-1?`<button class="p" id="tNext">Start task ${TS.ti+2}</button>`:`<button class="p" id="tSus">Go to SUS questionnaire</button>`}</div></div>`;
+  } else if(TS.phase==="sus"){
+    h=`<div class="tpanel"><h3>SUS — ${esc(TS.pid)}</h3><p class="meta">1 = strongly disagree · 5 = strongly agree</p><div class="sus">
+      ${SUSQ.map((q,i)=>`<div class="q">${i+1}. ${q}<div class="scale">${[1,2,3,4,5].map(n=>`<button data-sus="${i}" data-v="${n}" aria-pressed="${TS.sus[i]===n}">${n}</button>`).join("")}</div></div>`).join("")}
+      <label class="meta">Comment / biggest problem<input id="tCom"></label></div>
+      <div class="btns"><button class="p" id="tSave" ${TS.sus.includes(0)?"disabled":""}>Save participant</button></div></div>`;
+  } else if(TS.phase==="results"){
+    const R=allResults();
+    const per=TASKS.map(k=>{const rows=R.map(p=>p.tasks.find(x=>x.task===k.id)).filter(Boolean);const ok=rows.filter(r=>r.success);
+      return {id:k.id,n:rows.length,rate:rows.length?Math.round(ok.length/rows.length*100):0,t:ok.length?Math.round(ok.reduce((a,b)=>a+b.seconds,0)/ok.length):0,taps:rows.length?Math.round(rows.reduce((a,b)=>a+b.taps,0)/rows.length):0}});
+    const sus=R.length?Math.round(R.reduce((a,p)=>a+p.sus_score,0)/R.length*10)/10:0;
+    h=`<div class="tpanel"><h3>Results · ${R.length} participants</h3>
+      <table class="res"><tr><th>Task</th><th>Success</th><th>Avg time</th><th>Taps</th></tr>${per.map(p=>`<tr><td>${p.id}</td><td>${p.rate}%</td><td>${p.t}s</td><td>${p.taps}</td></tr>`).join("")}</table>
+      <p style="margin:10px 0 0;font-weight:800">Mean SUS: ${sus}</p>
+      <table class="res">${R.map(p=>`<tr><td>${esc(p.pid)}</td><td>${esc(p.group)}</td><td>SUS ${p.sus_score}</td></tr>`).join("")}</table>
+      <div class="btns"><button class="p" id="tCsv">Export CSV</button><button id="tJson">Copy JSON</button><button id="tNew">New participant</button><button id="tClear">Clear all</button></div></div>`;
+  }
+  host.innerHTML=h;
+  const on=(id,f)=>{const x=host.querySelector("#"+id);if(x)x.onclick=f};
+  on("tGo",()=>{TS.pid=host.querySelector("#tpid").value||"P?";TS.group=host.querySelector("#tgrp").value||"";TS.ti=0;TS.res=[];TS.sus=Array(10).fill(0);startTask()});
+  on("tShow",()=>{TS.phase="results";renderTest()});
+  on("tFail",()=>finishTask(false)); on("tOk",()=>finishTask(true));
+  on("tNext",()=>{TS.ti++;startTask()});
+  on("tSus",()=>{TS.phase="sus";renderTest()});
+  host.querySelectorAll("[data-sus]").forEach(b=>b.onclick=()=>{TS.sus[+b.dataset.sus]=+b.dataset.v;const c=host.querySelector("#tCom").value;renderTest();host.querySelector("#tCom").value=c});
+  on("tSave",()=>{const R=allResults();R.push({pid:TS.pid,group:TS.group,date:new Date().toISOString(),tasks:TS.res,sus:TS.sus,sus_score:susScore(TS.sus),comment:host.querySelector("#tCom").value});localStorage.setItem("sn_tests",JSON.stringify(R));TS.phase="results";renderTest()});
+  on("tNew",()=>{TS.phase="intro";renderTest()});
+  on("tClear",()=>{if(confirm("Delete all saved test results on this device?")){localStorage.removeItem("sn_tests");renderTest()}});
+  on("tCsv",()=>{const R=allResults();const rows=[["participant","group","date","task","success","seconds","taps","sus_score","comment"]];
+    R.forEach(p=>p.tasks.forEach(x=>rows.push([p.pid,p.group,p.date,x.task,x.success,x.seconds,x.taps,p.sus_score,p.comment])));
+    R.forEach(p=>rows.push([p.pid,p.group,p.date,"SUS_items",p.sus.join(" "),"","",p.sus_score,""]));
+    const csv=rows.map(r=>r.map(v=>`"${String(v??"").replace(/"/g,'""')}"`).join(",")).join("\n");
+    const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["﻿"+csv],{type:"text/csv"}));a.download="smog_navigator_usability.csv";a.click()});
+  on("tJson",()=>{navigator.clipboard.writeText(JSON.stringify(allResults(),null,1));toast("Results copied")});
+}
+setInterval(()=>{const c=document.getElementById("tClock");if(c&&TS.phase==="task")c.textContent=Math.round((performance.now()-TS.start)/1000)+"s"},500);
+function mobileTestHost(){let m=document.getElementById("mt");if(!m){m=document.createElement("div");m.id="mt";m.className="mobile-test";m.innerHTML=`<button onclick="this.nextElementSibling.hidden=!this.nextElementSibling.hidden">Test</button><div></div>`;$("#screen").appendChild(m)}return m.lastElementChild}
+
+/* boot */
+renderAll(); loadAir(false); if(TEST) renderTest();
+</script>
+</body>
+</html>
