@@ -276,7 +276,7 @@ table.res{width:100%;border-collapse:collapse;font-size:.8rem;margin-top:8px}
 table.res td,table.res th{border-bottom:1px solid var(--line);padding:5px 4px;text-align:left}
 .mobile-test{position:absolute;z-index:90;right:10px;top:50px}
 .mobile-test > button{border:0;border-radius:99px;background:#1f2d3d;color:#fff;padding:8px 12px;font-weight:700;font-size:.8rem}
-.mobile-test .tpanel{position:absolute;right:0;top:40px;width:300px;max-height:70vh;overflow:auto}
+.mobile-test .tpanel{position:absolute;right:0;top:40px;width:min(300px,calc(100vw - 20px));max-height:70vh;overflow:auto}
 
 @media (prefers-reduced-motion: reduce){
   *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
